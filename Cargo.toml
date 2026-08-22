@@ -29,17 +29,16 @@ serde_json = "1.0.140"
 url = "2.5.4"
 sha2 = "0.10.8"
 hex = "0.4.3"
-egui = { version = "0.29", optional = true }
-eframe = { version = "0.29", optional = true, default-features = false, features = ["default_fonts", "egui_extras", "glow"] }
-notify = { version = "7.0", optional = true }
-serde_yaml = { version = "0.9", optional = true }
 
 [dev-dependencies]
 tempfile = "3.15.0"
 
 [features]
 default = []
-gui = ["egui", "eframe", "notify", "serde_yaml"]
+# GUI sources are compiled with `--features gui` once egui/eframe are
+# added to Cargo.lock and vendor/. The feature flag stays so `#[cfg(feature = "gui")]`
+# modules keep compiling as a no-op until those crates are vendored.
+gui = []
 
 [profile.release]
 lto = "thin"
