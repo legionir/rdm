@@ -1,128 +1,69 @@
 name: Build rdm (CLI + GUI)
 
 on:
-
   push:
-
     branches: [main, arena/*]
-
     tags: ['v*']
-
   pull_request:
-
     branches: [main]
-
   workflow_dispatch:
 
 permissions:
-
   contents: read
-
   actions: write
 
 jobs:
-
   build-cli:
-
     runs-on: ubuntu-latest
-
     steps:
-
       - uses: actions/checkout@v4
-
       - name: Install Rust
-
         uses: dtolnay/rust-toolchain@stable
-
       - name: Configure vendored sources
-
         run: |
-
           mkdir -p .cargo
-
           cp vendor-config.txt .cargo/config.toml || echo "[source.crates-io]\nreplace-with = \"vendored-sources\"\n[source.vendored-sources]\ndirectory = \"vendor\"" > .cargo/config.toml
-
       - name: Build CLI binary
-
         run: cargo build --release --locked
-
       - name: Upload CLI artifact
-
         uses: actions/upload-artifact@v4
-
         with:
-
           name: rdm-cli
-
           path: target/release/rdm
 
   build-gui:
-
     runs-on: ubuntu-latest
-
     steps:
-
       - uses: actions/checkout@v4
-
       - name: Install Rust
-
         uses: dtolnay/rust-toolchain@stable
-
       - name: Configure vendored sources
-
         run: |
-
           mkdir -p .cargo
-
           cp vendor-config.txt .cargo/config.toml || echo "[source.crates-io]\nreplace-with = \"vendored-sources\"\n[source.vendored-sources]\ndirectory = \"vendor\"" > .cargo/config.toml
-
       - name: Build GUI binary (requires egui in vendor/network)
-
         run: cargo build --release --locked --features gui || echo "GUI build skipped: egui/eframe dependencies not vendored or unavailable"
-
       - name: Upload GUI artifact (if built)
-
         if: success()
-
         uses: actions/upload-artifact@v4
-
         with:
-
           name: rdm-gui
-
           path: target/release/rdm
 
   release:
-
     needs: [build-cli, build-gui]
-
     if: startsWith(github.ref, 'refs/tags/v')
-
     runs-on: ubuntu-latest
-
     permissions:
-
       contents: write
-
     steps:
-
       - uses: actions/checkout@v4
-
       - name: Download artifacts
-
         uses: actions/download-artifact@v4
-
         with:
-
           path: artifacts
-
       - name: Create Release
-
         env:
-
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
         run: |
-
           gh release create "${GITHUB_REF#refs/tags/}" --title "Release ${GITHUB_REF#refs/tags/}" --notes "Build artifacts for CLI and GUI." artifacts/rdm/* || true
-
