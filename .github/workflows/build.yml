@@ -42,7 +42,7 @@ jobs:
           mkdir -p .cargo
           cp vendor-config.txt .cargo/config.toml || echo "[source.crates-io]\nreplace-with = \"vendored-sources\"\n[source.vendored-sources]\ndirectory = \"vendor\"" > .cargo/config.toml
       - name: Build GUI binary (requires egui in vendor/network)
-        run: cargo build --release --locked --features gui || echo "GUI build skipped: egui/eframe dependencies not vendored or unavailable"
+        run: 'cargo build --release --locked --features gui || echo "GUI build skipped: egui/eframe dependencies not vendored or unavailable"'
       - name: Upload GUI artifact (if built)
         if: success()
         uses: actions/upload-artifact@v4
