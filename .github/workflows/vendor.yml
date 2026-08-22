@@ -1,0 +1,50 @@
+name: vendor-bootstrap
+
+# Generates Cargo.lock + a fully vendored dependency tree (cargo vendor) and
+# pushes them to the `arena-vendor` branch of this repository.
+# Used to bootstrap offline development in network-restricted sandboxes.
+
+on:
+  push:
+    branches: [arena/01a02aba-rdm]
+    paths:
+      - "Cargo.toml"
+      - ".github/workflows/vendor.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: arena/01a02aba-rdm
+          fetch-depth: 1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Resolve lockfile
+        run: cargo generate-lockfile
+
+      - name: Vendor dependencies
+        run: |
+          cargo vendor --locked vendor > vendor-config.txt
+          echo "---- vendor config ----"
+          cat vendor-config.txt
+
+      - name: Publish vendor branch
+        run: |
+          git config user.name "rdm bootstrap"
+          git config user.email "rdm-bootstrap@users.noreply.github.com"
+          git checkout --orphan arena-vendor
+          git rm -rfq --cached . || true
+          git add -f vendor Cargo.lock vendor-config.txt
+          git commit -qm "bootstrap: vendored dependencies for rdm"
+          git push --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/legionir/rdm.git" \
+            HEAD:refs/heads/arena-vendor
