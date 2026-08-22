@@ -14,22 +14,47 @@ permissions:
 
 jobs:
   build-cli:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: rdm-linux-x86_64
+            binary: rdm
+          - os: windows-latest
+            artifact: rdm-windows-x86_64.exe
+            binary: rdm.exe
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Configure vendored sources
+        shell: bash
         run: |
           mkdir -p .cargo
-          cp vendor-config.txt .cargo/config.toml || echo "[source.crates-io]\nreplace-with = \"vendored-sources\"\n[source.vendored-sources]\ndirectory = \"vendor\"" > .cargo/config.toml
+          if [ -f vendor-config.txt ]; then
+            cp vendor-config.txt .cargo/config.toml
+          else
+            printf '%s\n' \
+              '[source.crates-io]' \
+              'replace-with = "vendored-sources"' \
+              '[source.vendored-sources]' \
+              'directory = "vendor"' > .cargo/config.toml
+          fi
       - name: Build CLI binary
         run: cargo build --release --locked
+      - name: Stage CLI binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/release/${{ matrix.binary }}" "dist/${{ matrix.artifact }}"
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rdm-cli
-          path: target/release/rdm
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+          if-no-files-found: error
 
   build-gui:
     runs-on: ubuntu-latest
@@ -40,30 +65,67 @@ jobs:
       - name: Configure vendored sources
         run: |
           mkdir -p .cargo
-          cp vendor-config.txt .cargo/config.toml || echo "[source.crates-io]\nreplace-with = \"vendored-sources\"\n[source.vendored-sources]\ndirectory = \"vendor\"" > .cargo/config.toml
+          cp vendor-config.txt .cargo/config.toml || true
       - name: Build GUI binary (requires egui in vendor/network)
-        run: 'cargo build --release --locked --features gui || echo "GUI build skipped: egui/eframe dependencies not vendored or unavailable"'
+        run: |
+          if cargo build --release --locked --features gui; then
+            mkdir -p dist
+            cp target/release/rdm dist/rdm-gui-linux-x86_64
+            chmod +x dist/rdm-gui-linux-x86_64
+          else
+            echo "GUI build skipped: egui/eframe dependencies not vendored or unavailable"
+          fi
       - name: Upload GUI artifact (if built)
-        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: rdm-gui
-          path: target/release/rdm
+          name: rdm-gui-linux-x86_64
+          path: dist/rdm-gui-linux-x86_64
+          if-no-files-found: ignore
 
   release:
     needs: [build-cli, build-gui]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Create Release
+          merge-multiple: true
+      - name: Publish GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${GITHUB_REF#refs/tags/}" --title "Release ${GITHUB_REF#refs/tags/}" --notes "Build artifacts for CLI and GUI." artifacts/rdm/* || true
+          set -euo pipefail
+          ls -la artifacts
+          test -f artifacts/rdm-linux-x86_64
+
+          ASSETS=(artifacts/rdm-linux-x86_64)
+          if [[ -f artifacts/rdm-windows-x86_64.exe ]]; then
+            ASSETS+=(artifacts/rdm-windows-x86_64.exe)
+          fi
+          if [[ -f artifacts/rdm-gui-linux-x86_64 ]]; then
+            ASSETS+=(artifacts/rdm-gui-linux-x86_64)
+          fi
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            gh release create "${TAG}" "${ASSETS[@]}" \
+              --title "rdm ${TAG}" \
+              --notes "Release ${TAG} (\`${GITHUB_SHA}\`)." \
+              --verify-tag \
+              --repo "${GITHUB_REPOSITORY}"
+          else
+            TAG="nightly"
+            if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+              gh release delete "${TAG}" --yes --cleanup-tag --repo "${GITHUB_REPOSITORY}" || true
+            fi
+            gh release create "${TAG}" "${ASSETS[@]}" \
+              --title "rdm nightly" \
+              --notes "Automatic build from \`${GITHUB_REF_NAME}\` (\`${GITHUB_SHA}\`)." \
+              --prerelease \
+              --target "${GITHUB_SHA}" \
+              --repo "${GITHUB_REPOSITORY}"
+          fi
