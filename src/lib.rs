@@ -18,3 +18,6 @@ pub mod models;
 pub mod network;
 pub mod storage;
 pub mod utils;
+
+#[cfg(feature = "gui")]
+pub mod gui;
