@@ -2,4 +2,6 @@
 
 pub mod download;
 
-pub use download::{ChunkRecord, ChunkStatus, DownloadRecord, DownloadState, PublicId};
+pub use download::{
+    ChunkRecord, ChunkStatus, DownloadId, DownloadRecord, DownloadState, PublicId,
+};

@@ -2,7 +2,7 @@
 
 **rdm** (Rust Download Manager) is a multi-connection, resumable HTTP/HTTPS downloader inspired by IDM. It splits a file into ranges, fetches them in parallel, stores progress in SQLite, and can pause, resume, or verify the result.
 
-The default build is a **CLI**. An optional `gui` feature exists in the source tree; it only builds once `egui` / `eframe` are added to `Cargo.lock` and `vendor/`.
+The default build is a **CLI**. The native desktop UI lives in the `rdm-gui` crate (`egui` / `eframe`).
 
 ## Features
 
@@ -32,7 +32,8 @@ After CI publishes assets (see [Releases](https://github.com/legionir/rdm/releas
 | --- | --- |
 | Linux x86_64 | `rdm-linux-x86_64` |
 | Windows x86_64 | `rdm-windows-x86_64.exe` |
-| Linux GUI (when vendored) | `rdm-gui-linux-x86_64` |
+| Linux GUI | `rdm-gui-linux-x86_64` |
+| Windows GUI | `rdm-gui-windows-x86_64.exe` |
 
 ```bash
 # Linux
@@ -80,13 +81,26 @@ cargo build --release --locked
 .\target\release\rdm.exe --help
 ```
 
-### GUI (optional)
+### GUI
+
+`egui` is not vendored. Build `rdm-gui` with crates.io (and on Linux, GTK/X11/OpenGL dev packages):
 
 ```bash
-cargo build --release --locked --features gui
+# Linux packages (Debian/Ubuntu)
+sudo apt-get install -y pkg-config libgtk-3-dev libx11-dev libgl1-mesa-dev \
+  libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
+
+# Do not use vendor/ for this crate
+rm -f .cargo/config.toml
+cargo build --release --manifest-path rdm-gui/Cargo.toml
 ```
 
-This succeeds only after GUI crates are present in the lockfile and vendor tree.
+Run:
+
+```bash
+./rdm-gui/target/release/rdm-gui          # Linux
+.\rdm-gui\target\release\rdm-gui.exe      # Windows
+```
 
 ## Run
 
