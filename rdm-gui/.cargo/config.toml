@@ -1,3 +1,0 @@
-# Temporary: surfaces rustc diagnostics as CI annotations (see ci-rustc-annotate.sh).
-[build]
-rustc-wrapper = "./ci-rustc-annotate.sh"
