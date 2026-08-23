@@ -120,8 +120,36 @@ vice versa.
 | `rdm remove <ID> [--purge]` | 🗑 row button (confirmation + "delete file too") and *Clear completed* |
 | `--data-dir DIR` | `--data-dir` flag and the *Metadata directory* field in Settings |
 
+Beyond the CLI surface the window adds:
+
+* **Download queue** — at most `max_concurrent` transfers run at once
+  (default 3, `0` = unlimited); the rest wait in the *Queue* tab and can be
+  dropped individually or all at once.
+* **App log tab** — the engine's `tracing` output is captured in-process and
+  shown live; verbosity is a combo box (`off`..`trace`), also settable with
+  `-v` / `-vv` / `-vvv`, and `RUST_LOG` still wins.
+* **Safe exit** — closing the window pauses the transfers this window owns and
+  waits for their engines to flush, exactly like Ctrl+C does for the CLI;
+  anything that cannot stop within 5 s is marked `interrupted` so it offers
+  *Resume*. Downloads driven by another process are never touched.
+
 Defaults for new downloads live in `<data-dir>/settings.toml`; the window
-reloads that file automatically when it changes on disk.
+reloads that file automatically when it changes on disk:
+
+```toml
+download_dir    = "/home/me/Downloads"
+connections     = 8
+retries         = 5
+chunk_size      = "1MiB"
+max_speed       = ""          # e.g. "5MB/s"
+timeout_secs    = 30
+max_concurrent  = 3           # 0 = unlimited
+refresh_ms      = 600
+confirm_remove  = true
+purge_on_remove = false
+dark_mode       = true
+log_level       = "info"
+```
 
 ## Run
 
