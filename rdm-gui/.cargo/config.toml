@@ -1,0 +1,5 @@
+# Temporary diagnostics: wrap rustc so compile errors are re-emitted as
+# GitHub Actions annotations (::error::), because raw CI logs are not
+# readable from the current sandbox. Remove once the GUI build is fixed.
+[build]
+rustc-wrapper = "./diag-wrapper.sh"
