@@ -64,6 +64,39 @@ jobs:
           path: dist/rdm-windows-x86_64.exe
           if-no-files-found: error
 
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Configure vendored sources
+        run: |
+          mkdir -p .cargo
+          cp vendor-config.txt .cargo/config.toml
+      - name: Unit + integration tests
+        run: cargo test --locked --all-targets
+      - name: Surface test failures
+        if: failure()
+        shell: bash
+        run: |
+          out=$(cargo test --locked --all-targets --no-fail-fast 2>&1 \
+            | grep -E "^(error|test .* FAILED|failures:|thread .* panicked|assertion)" | tail -50)
+          printf '::error title=cargo test::%s\n' \
+            "$(printf '%s' "$out" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Disable vendored crates.io (Windows line endings break vendor checksums)
+        shell: bash
+        run: rm -f .cargo/config.toml .cargo/config
+      - name: Unit + integration tests
+        run: cargo test --all-targets
+
   build-gui-linux:
     runs-on: ubuntu-latest
     steps:
@@ -82,6 +115,22 @@ jobs:
       - name: Build GUI binary
         working-directory: rdm-gui
         run: cargo build --release
+      - name: Surface compiler errors
+        if: failure()
+        working-directory: rdm-gui
+        shell: bash
+        run: |
+          # Actions logs are not always downloadable, so a failed build echoes
+          # its diagnostics back as a single workflow annotation, which is
+          # readable through the REST API. Dependencies are already compiled,
+          # so re-running the build costs seconds.
+          out=$(cargo build --release --message-format=short 2>&1 | grep -E 'error(\[|:)' | tail -50)
+          printf '::error title=rustc::%s\n' \
+            "$(printf '%s' "$out" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+      - name: Test GUI crate
+        working-directory: rdm-gui
+        shell: bash
+        run: cargo test --release
       - name: Stage GUI binary
         run: |
           mkdir -p dist
@@ -106,6 +155,22 @@ jobs:
       - name: Build GUI binary
         working-directory: rdm-gui
         run: cargo build --release
+      - name: Surface compiler errors
+        if: failure()
+        working-directory: rdm-gui
+        shell: bash
+        run: |
+          # Actions logs are not always downloadable, so a failed build echoes
+          # its diagnostics back as a single workflow annotation, which is
+          # readable through the REST API. Dependencies are already compiled,
+          # so re-running the build costs seconds.
+          out=$(cargo build --release --message-format=short 2>&1 | grep -E 'error(\[|:)' | tail -50)
+          printf '::error title=rustc::%s\n' \
+            "$(printf '%s' "$out" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+      - name: Test GUI crate
+        working-directory: rdm-gui
+        shell: bash
+        run: cargo test --release
       - name: Stage GUI binary
         shell: bash
         run: |
@@ -119,8 +184,8 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [build-cli-linux, build-cli-windows, build-gui-linux, build-gui-windows]
-    if: always() && !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.build-cli-linux.result == 'success'
+    needs: [build-cli-linux, build-cli-windows, build-gui-linux, build-gui-windows, test-linux]
+    if: always() && !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.build-cli-linux.result == 'success' && needs.test-linux.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
