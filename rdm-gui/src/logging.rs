@@ -152,3 +152,29 @@ pub fn install(default_level: &str) -> Option<LogControl> {
         .ok()?;
     Some(LogControl { handle, buffer })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn splits_the_level_off_a_line() {
+        assert_eq!(split_level("INFO probing https://x — ok"), ("info", "probing https://x — ok"));
+        assert_eq!(split_level(" WARN  slow"), ("warn", "slow"));
+        assert_eq!(split_level("no level here"), ("info", "no level here"));
+    }
+
+    #[test]
+    fn buffer_keeps_lines_in_order_and_drains() {
+        let buffer = LogBuffer::new();
+        buffer.push("INFO first");
+        buffer.push("ERROR second");
+        buffer.push("   ");
+        let drained = buffer.drain();
+        assert_eq!(drained.len(), 2);
+        assert_eq!(drained[0].level, "info");
+        assert_eq!(drained[0].text, "first");
+        assert_eq!(drained[1].level, "error");
+        assert!(buffer.drain().is_empty());
+    }
+}

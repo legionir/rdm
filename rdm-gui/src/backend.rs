@@ -508,6 +508,13 @@ impl Backend {
     ///
     /// `max_concurrent == 0` means "no limit".
     fn enqueue(&self, opts: EngineOptions, label: String, max_concurrent: usize) -> Result<u64> {
+        let seq = self.push_job(opts, label)?;
+        self.pump(max_concurrent);
+        Ok(seq)
+    }
+
+    /// Register a job at the back of the queue without starting anything.
+    fn push_job(&self, opts: EngineOptions, label: String) -> Result<u64> {
         let key = job_key(&opts);
         {
             let mut launching = self.launching.lock().unwrap();
@@ -529,7 +536,6 @@ impl Backend {
             key,
         };
         self.queue.lock().unwrap().push_back(job);
-        self.pump(max_concurrent);
         Ok(seq)
     }
 
@@ -538,7 +544,7 @@ impl Backend {
     pub fn pump(&self, max_concurrent: usize) -> usize {
         let mut started = 0usize;
         loop {
-            if max_concurrent > 0 && self.active_jobs() >= max_concurrent {
+            if !slot_available(self.active_jobs(), max_concurrent) {
                 break;
             }
             let job = match self.queue.lock().unwrap().pop_front() {
@@ -653,6 +659,11 @@ impl Backend {
     }
 }
 
+/// May another engine start? `max_concurrent == 0` means "no limit".
+fn slot_available(active: usize, max_concurrent: usize) -> bool {
+    max_concurrent == 0 || active < max_concurrent
+}
+
 /// De-duplication key for a job: the URL plus its resolved output (if known).
 fn job_key(opts: &EngineOptions) -> String {
     format!(
@@ -734,5 +745,146 @@ async fn track_download_id(
             *slot.lock().unwrap() = Some(row.id);
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_a_well_formed_sha256() {
+        let hex = "a".repeat(64);
+        let (algo, digest) = parse_checksum(&format!("SHA256:{hex}")).unwrap();
+        assert_eq!(algo, "sha256");
+        assert_eq!(digest, hex);
+    }
+
+    #[test]
+    fn rejects_bad_checksums() {
+        assert!(parse_checksum("deadbeef").is_err());
+        assert!(parse_checksum("md5:abc").is_err());
+        assert!(parse_checksum("sha256:xyz").is_err());
+        assert!(parse_checksum(&format!("sha256:{}", "z".repeat(64))).is_err());
+    }
+
+    #[test]
+    fn job_keys_separate_url_from_output() {
+        let mut a = EngineOptions::default();
+        a.url = "https://example.com/f.bin".to_string();
+        a.output = Some(PathBuf::from("/tmp/f.bin"));
+        let mut b = a.clone();
+        b.output = Some(PathBuf::from("/tmp/other.bin"));
+        let mut c = a.clone();
+        c.output = None;
+        assert_ne!(job_key(&a), job_key(&b));
+        assert_ne!(job_key(&a), job_key(&c));
+        assert_eq!(job_key(&a), job_key(&a.clone()));
+    }
+
+    #[test]
+    fn absolutize_leaves_absolute_paths_alone() {
+        let absolute = Path::new(if cfg!(windows) { "C:\\tmp\\x" } else { "/tmp/x" });
+        assert_eq!(absolutize(absolute), absolute.to_path_buf());
+        assert!(absolutize(Path::new("relative/x")).is_absolute());
+    }
+
+    #[test]
+    fn chunk_spec_falls_back_to_one_mib() {
+        assert_eq!(chunk_spec("  "), "1MiB");
+        assert_eq!(chunk_spec(" 4MB "), "4MB");
+    }
+
+    fn backend() -> Backend {
+        use std::sync::atomic::AtomicUsize;
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "rdm-gui-test-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        Backend::new(&dir).expect("backend")
+    }
+
+    #[test]
+    fn engine_options_mirror_the_cli_validation() {
+        let backend = backend();
+        let mut request = StartRequest::default();
+        request.url = "https://example.com/file.zip".to_string();
+        request.chunk_size = "2MiB".to_string();
+        request.max_speed = "5MB/s".to_string();
+        let opts = backend.engine_options(&request).expect("valid request");
+        assert_eq!(opts.chunk_size, 2 * 1024 * 1024);
+        assert_eq!(opts.max_speed, Some(5_000_000));
+        assert!(opts.no_progress, "a windowed app must not draw progress bars");
+
+        request.url = "ftp://example.com/x".to_string();
+        assert!(backend.engine_options(&request).is_err());
+
+        request.url = "https://example.com/x".to_string();
+        request.connections = 0;
+        assert!(backend.engine_options(&request).is_err());
+    }
+
+    #[test]
+    fn slot_accounting() {
+        assert!(slot_available(0, 1));
+        assert!(!slot_available(1, 1));
+        assert!(slot_available(9, 0), "0 means unlimited");
+        assert!(slot_available(2, 3));
+    }
+
+    #[test]
+    fn queue_is_fifo_and_droppable() {
+        let backend = backend();
+        let mut request = StartRequest::default();
+        request.output = std::env::temp_dir().display().to_string();
+
+        let mut seqs = Vec::new();
+        for name in ["a", "b", "c"] {
+            request.url = format!("https://example.invalid/{name}.bin");
+            let opts = backend.engine_options(&request).unwrap();
+            seqs.push(backend.push_job(opts, name.to_string()).unwrap());
+        }
+        assert_eq!(backend.pending_len(), 3);
+        let labels: Vec<String> = backend.pending().iter().map(|j| j.label.clone()).collect();
+        assert_eq!(labels, vec!["a", "b", "c"]);
+
+        let dropped = backend.cancel_pending(seqs[1]).expect("second job");
+        assert_eq!(dropped.label, "b");
+        assert!(backend.cancel_pending(seqs[1]).is_none(), "already gone");
+        let labels: Vec<String> = backend.pending().iter().map(|j| j.label.clone()).collect();
+        assert_eq!(labels, vec!["a", "c"]);
+
+        assert_eq!(backend.clear_queue(), 2);
+        assert_eq!(backend.pending_len(), 0);
+    }
+
+    #[test]
+    fn duplicate_jobs_are_rejected() {
+        let backend = backend();
+        let mut request = StartRequest::default();
+        request.url = "https://example.invalid/dup.bin".to_string();
+        request.output = std::env::temp_dir().join("dup.bin").display().to_string();
+        let first = backend.engine_options(&request).unwrap();
+        let second = backend.engine_options(&request).unwrap();
+        backend.push_job(first, "dup".to_string()).unwrap();
+        assert!(backend.push_job(second, "dup".to_string()).is_err());
+    }
+
+    #[test]
+    fn dropping_a_queued_job_frees_its_key() {
+        let backend = backend();
+        let mut request = StartRequest::default();
+        request.url = "https://example.invalid/again.bin".to_string();
+        request.output = std::env::temp_dir().join("again.bin").display().to_string();
+        let opts = backend.engine_options(&request).unwrap();
+        let seq = backend.push_job(opts, "again".to_string()).unwrap();
+        backend.cancel_pending(seq).unwrap();
+        let opts = backend.engine_options(&request).unwrap();
+        assert!(
+            backend.push_job(opts, "again".to_string()).is_ok(),
+            "the de-duplication key must be released when a job is dropped"
+        );
     }
 }

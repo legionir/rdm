@@ -104,3 +104,31 @@ pub fn open_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
     };
     cmd.spawn().map(|_| ())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_epoch_milliseconds() {
+        assert_eq!(format_timestamp(0), "—");
+        assert_eq!(format_timestamp(1_000), "1970-01-01 00:00:01 UTC");
+        assert_eq!(format_timestamp(1_700_000_000_000), "2023-11-14 22:13:20 UTC");
+    }
+
+    #[test]
+    fn formats_durations() {
+        assert_eq!(format_duration(9.4), "9s");
+        assert_eq!(format_duration(75.0), "1m 15s");
+        assert_eq!(format_duration(3725.0), "1h 02m 05s");
+        assert_eq!(format_duration(f64::NAN), "—");
+    }
+
+    #[test]
+    fn formats_relative_times() {
+        let now = now_ms();
+        assert_eq!(format_relative(0), "—");
+        assert_eq!(format_relative(now), "just now");
+        assert_eq!(format_relative(now - 120_000), "2m ago");
+    }
+}

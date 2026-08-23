@@ -221,3 +221,55 @@ impl SettingsStore {
 fn modified_at(path: &Path) -> Option<SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trips_through_the_file_format() {
+        let mut settings = AppSettings::default();
+        settings.download_dir = "/tmp/dl".to_string();
+        settings.connections = 16;
+        settings.chunk_size = "4MiB".to_string();
+        settings.max_speed = "5MB/s".to_string();
+        settings.max_concurrent = 2;
+        settings.log_level = "debug".to_string();
+        settings.confirm_remove = false;
+        let parsed = AppSettings::parse(&settings.serialize());
+        assert_eq!(parsed, settings);
+    }
+
+    #[test]
+    fn accepts_the_legacy_key_names() {
+        let parsed = AppSettings::parse(
+            "output_dir = \"/data\"\nmax_connections = 12\nchunk_size_mb = 8\nretry_limit = 9\n",
+        );
+        assert_eq!(parsed.download_dir, "/data");
+        assert_eq!(parsed.connections, 12);
+        assert_eq!(parsed.chunk_size, "8MiB");
+        assert_eq!(parsed.retries, 9);
+    }
+
+    #[test]
+    fn ignores_comments_and_junk_and_clamps() {
+        let parsed = AppSettings::parse(
+            "# comment\nconnections = 999\nrefresh_ms = 1\nnonsense\nlog_level = \"nope\"\n",
+        );
+        assert_eq!(parsed.connections, 128);
+        assert_eq!(parsed.refresh_ms, 100);
+        assert_eq!(parsed.log_level, "info");
+    }
+
+    #[test]
+    fn form_defaults_come_from_the_settings() {
+        let mut settings = AppSettings::default();
+        settings.download_dir = "/downloads".to_string();
+        settings.connections = 4;
+        let request = settings.to_request();
+        assert_eq!(request.output, "/downloads");
+        assert_eq!(request.connections, 4);
+        assert!(!request.resume);
+        assert!(request.url.is_empty());
+    }
+}
