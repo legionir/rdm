@@ -12,48 +12,56 @@ permissions:
   contents: read
   actions: write
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
 jobs:
-  build-cli:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact: rdm-linux-x86_64
-            binary: rdm
-          - os: windows-latest
-            artifact: rdm-windows-x86_64.exe
-            binary: rdm.exe
-    runs-on: ${{ matrix.os }}
+  build-cli-linux:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Configure vendored sources
-        shell: bash
         run: |
           mkdir -p .cargo
-          if [ -f vendor-config.txt ]; then
-            cp vendor-config.txt .cargo/config.toml
-          else
-            printf '%s\n' \
-              '[source.crates-io]' \
-              'replace-with = "vendored-sources"' \
-              '[source.vendored-sources]' \
-              'directory = "vendor"' > .cargo/config.toml
-          fi
+          cp vendor-config.txt .cargo/config.toml
       - name: Build CLI binary
         run: cargo build --release --locked
+      - name: Stage CLI binary
+        run: |
+          mkdir -p dist
+          cp target/release/rdm dist/rdm-linux-x86_64
+          chmod +x dist/rdm-linux-x86_64
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdm-linux-x86_64
+          path: dist/rdm-linux-x86_64
+          if-no-files-found: error
+
+  build-cli-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build CLI binary
+        # Do not use vendor/ + --locked here. The lockfile/vendor tree was
+        # produced on Linux and is missing some Windows-only crates, so a
+        # vendored locked build fails before rustc even starts.
+        run: cargo build --release
       - name: Stage CLI binary
         shell: bash
         run: |
           mkdir -p dist
-          cp "target/release/${{ matrix.binary }}" "dist/${{ matrix.artifact }}"
+          cp target/release/rdm.exe dist/rdm-windows-x86_64.exe
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.artifact }}
+          name: rdm-windows-x86_64.exe
+          path: dist/rdm-windows-x86_64.exe
           if-no-files-found: error
 
   build-gui:
@@ -83,8 +91,8 @@ jobs:
           if-no-files-found: ignore
 
   release:
-    needs: [build-cli, build-gui]
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [build-cli-linux, build-cli-windows, build-gui]
+    if: always() && !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.build-cli-linux.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -94,6 +102,7 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+          ignore-missing: true
       - name: Publish GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
