@@ -98,8 +98,57 @@ cargo build --release --manifest-path rdm-gui/Cargo.toml
 Run:
 
 ```bash
-./rdm-gui/target/release/rdm-gui          # Linux
-.\rdm-gui\target\release\rdm-gui.exe      # Windows
+./rdm-gui/target/release/rdm-gui                     # Linux
+./rdm-gui/target/release/rdm-gui --data-dir ~/.rdm   # pick another metadata dir
+.\rdm-gui\target\release\rdm-gui.exe                 # Windows
+```
+
+`rdm-gui` is **standalone**: it links the `rdm` library and runs the download
+engine in-process, so the `rdm` binary does not need to be installed next to
+it. Both programs share `<data-dir>/metadata.db`, which means a download
+started in the terminal can be paused, resumed or removed from the window and
+vice versa.
+
+| CLI | GUI |
+| --- | --- |
+| `rdm download <URL> …` | **New download** dialog (output, connections, retries, chunk size, speed limit, timeout, checksum, user agent, resume/force) |
+| `rdm pause / resume / cancel <ID>` | ⏸ / ▶ / ⏹ row buttons, plus *Pause all* and *Resume all* |
+| `rdm download --force` | ⟲ *Restart* row button |
+| `rdm list [--state …]` | Download table with search box and state filter |
+| `rdm info <ID>` | **Overview**, **Chunks** and **Events** tabs of the detail panel |
+| `rdm info --json` | **JSON** tab (with *Copy JSON*) |
+| `rdm remove <ID> [--purge]` | 🗑 row button (confirmation + "delete file too") and *Clear completed* |
+| `--data-dir DIR` | `--data-dir` flag and the *Metadata directory* field in Settings |
+
+Beyond the CLI surface the window adds:
+
+* **Download queue** — at most `max_concurrent` transfers run at once
+  (default 3, `0` = unlimited); the rest wait in the *Queue* tab and can be
+  dropped individually or all at once.
+* **App log tab** — the engine's `tracing` output is captured in-process and
+  shown live; verbosity is a combo box (`off`..`trace`), also settable with
+  `-v` / `-vv` / `-vvv`, and `RUST_LOG` still wins.
+* **Safe exit** — closing the window pauses the transfers this window owns and
+  waits for their engines to flush, exactly like Ctrl+C does for the CLI;
+  anything that cannot stop within 5 s is marked `interrupted` so it offers
+  *Resume*. Downloads driven by another process are never touched.
+
+Defaults for new downloads live in `<data-dir>/settings.toml`; the window
+reloads that file automatically when it changes on disk:
+
+```toml
+download_dir    = "/home/me/Downloads"
+connections     = 8
+retries         = 5
+chunk_size      = "1MiB"
+max_speed       = ""          # e.g. "5MB/s"
+timeout_secs    = 30
+max_concurrent  = 3           # 0 = unlimited
+refresh_ms      = 600
+confirm_remove  = true
+purge_on_remove = false
+dark_mode       = true
+log_level       = "info"
 ```
 
 ## Run
