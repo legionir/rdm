@@ -128,6 +128,8 @@ pub struct GuiState {
     pub pending_remove: Option<(i64, String)>,
     pub data_dir_input: String,
     pub settings_dirty: bool,
+    /// Hide log lines below this level in the App log tab.
+    pub log_filter: usize,
 }
 
 impl GuiState {
@@ -152,6 +154,24 @@ impl GuiState {
             pending_remove: None,
             data_dir_input: data_dir,
             settings_dirty: false,
+            log_filter: 0,
+        }
+    }
+
+    /// Append a captured engine/tracing line without hijacking the status bar.
+    pub fn push_engine_log(&mut self, level: &'static str, text: impl Into<String>) {
+        self.log.push(LogLine {
+            at: crate::util::now_ms(),
+            level,
+            text: text.into(),
+        });
+        self.trim_log();
+    }
+
+    fn trim_log(&mut self) {
+        if self.log.len() > 1000 {
+            let overflow = self.log.len() - 1000;
+            self.log.drain(0..overflow);
         }
     }
 
@@ -164,10 +184,7 @@ impl GuiState {
             level,
             text,
         });
-        if self.log.len() > 500 {
-            let overflow = self.log.len() - 500;
-            self.log.drain(0..overflow);
-        }
+        self.trim_log();
     }
 
     /// Replace the table contents and refresh the speed estimates.

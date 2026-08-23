@@ -10,6 +10,7 @@
 
 mod app;
 mod backend;
+mod logging;
 mod settings;
 mod state;
 mod util;
@@ -26,12 +27,17 @@ USAGE:
 
 OPTIONS:
     -d, --data-dir <DIR>    Directory holding metadata.db (default: .rdm)
+    -v, -vv, -vvv           Engine log verbosity (info / debug / trace)
     -h, --help              Show this message
     -V, --version           Show the version
+
+The captured log is shown in the window's \"App log\" tab; RUST_LOG overrides
+these flags, exactly like the CLI.
 ";
 
 fn main() -> ExitCode {
     let mut data_dir = PathBuf::from(".rdm");
+    let mut verbosity: Option<&'static str> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -50,6 +56,9 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "-v" | "--verbose" => verbosity = Some("info"),
+            "-vv" => verbosity = Some("debug"),
+            "-vvv" => verbosity = Some("trace"),
             other => {
                 if let Some(dir) = other.strip_prefix("--data-dir=") {
                     data_dir = PathBuf::from(dir);
@@ -61,14 +70,19 @@ fn main() -> ExitCode {
         }
     }
 
-    if let Err(err) = run(data_dir) {
+    let logging = logging::install(verbosity.unwrap_or("info"));
+    if let Err(err) = run(data_dir, logging, verbosity) {
         eprintln!("rdm-gui: {err}");
         return ExitCode::from(1);
     }
     ExitCode::SUCCESS
 }
 
-fn run(data_dir: PathBuf) -> Result<(), eframe::Error> {
+fn run(
+    data_dir: PathBuf,
+    logging: Option<logging::LogControl>,
+    forced_level: Option<&'static str>,
+) -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 760.0])
@@ -81,7 +95,7 @@ fn run(data_dir: PathBuf) -> Result<(), eframe::Error> {
         options,
         Box::new(move |cc| {
             cc.egui_ctx.set_visuals(egui::Visuals::dark());
-            match app::RdmGuiApp::new(data_dir.clone()) {
+            match app::RdmGuiApp::new(data_dir.clone(), logging.clone(), forced_level) {
                 Ok(app) => Ok(Box::new(app) as Box<dyn eframe::App>),
                 Err(err) => Err(Box::<dyn std::error::Error + Send + Sync>::from(format!(
                     "{err:#}"

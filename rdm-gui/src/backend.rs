@@ -97,6 +97,10 @@ pub struct Backend {
     active: Arc<AtomicUsize>,
     /// `url\u{1}output` keys that are mid-launch, to stop double clicks.
     launching: Arc<Mutex<HashSet<String>>>,
+    /// Download ids whose engine runs inside *this* process. Only these are
+    /// touched on shutdown; transfers driven by a CLI in another terminal are
+    /// left alone.
+    owned: Arc<Mutex<HashSet<i64>>>,
 }
 
 impl Backend {
@@ -116,6 +120,7 @@ impl Backend {
             rx,
             active: Arc::new(AtomicUsize::new(0)),
             launching: Arc::new(Mutex::new(HashSet::new())),
+            owned: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -139,6 +144,54 @@ impl Backend {
 
     pub fn active_jobs(&self) -> usize {
         self.active.load(Ordering::SeqCst)
+    }
+
+    /// Ask every transfer owned by this window to pause, then wait (bounded)
+    /// for its engine to flush state. Called when the window closes so records
+    /// do not stay stuck in `running` — the CLI does the same on Ctrl+C.
+    ///
+    /// Downloads started elsewhere (another window, a terminal) are never
+    /// touched.
+    pub fn shutdown(&self, grace: Duration) -> usize {
+        let ids: Vec<i64> = {
+            let guard = self.owned.lock().unwrap();
+            guard.iter().copied().collect()
+        };
+        let mut asked = 0usize;
+        for id in &ids {
+            if let Ok(Some(row)) = self.storage.get_download_by_id(*id) {
+                if row.state.active() {
+                    let _ = self
+                        .storage
+                        .update_state(row.id, DownloadState::Paused, None);
+                    let _ = self
+                        .storage
+                        .log_event(row.id, "info", "window closing — pausing");
+                    asked += 1;
+                }
+            }
+        }
+        let deadline = std::time::Instant::now() + grace;
+        while self.active_jobs() > 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        // Whatever could not stop in time is marked interrupted, so the row
+        // offers Resume instead of pretending to run.
+        for id in &ids {
+            if let Ok(Some(row)) = self.storage.get_download_by_id(*id) {
+                if row.state.active() {
+                    let _ = self
+                        .storage
+                        .update_state(row.id, DownloadState::Interrupted, None);
+                    let _ = self.storage.log_event(
+                        row.id,
+                        "warn",
+                        "window closed while running — marked interrupted",
+                    );
+                }
+            }
+        }
+        asked
     }
 
     pub fn drain_events(&self) -> Vec<BackendEvent> {
@@ -448,13 +501,35 @@ impl Backend {
         let tx = self.tx.clone();
         let active = Arc::clone(&self.active);
         let launching = Arc::clone(&self.launching);
+        let owned = Arc::clone(&self.owned);
+        let storage = self.storage.clone();
+        let lookup_url = opts.url.clone();
+        let lookup_output = opts.output.clone();
         active.fetch_add(1, Ordering::SeqCst);
         let _ = tx.send(BackendEvent::Info(format!("started {label}")));
         self.rt.spawn(async move {
+            // The engine allocates (or finds) the database row itself, so the
+            // id is discovered by watching the database for a moment.
+            let slot: Arc<Mutex<Option<i64>>> = Arc::new(Mutex::new(None));
+            let tracker = tokio::spawn(track_download_id(
+                storage,
+                lookup_url,
+                lookup_output,
+                Arc::clone(&owned),
+                Arc::clone(&slot),
+            ));
             let result = match Engine::new(opts) {
                 Ok(engine) => engine.run().await,
                 Err(err) => Err(err),
             };
+            tracker.abort();
+            let tracked = *slot.lock().unwrap();
+            if let Some(id) = tracked {
+                owned.lock().unwrap().remove(&id);
+            }
+            if let Ok(outcome) = &result {
+                owned.lock().unwrap().remove(&outcome.download_id);
+            }
             active.fetch_sub(1, Ordering::SeqCst);
             launching.lock().unwrap().remove(&key);
             let event = match result {
@@ -534,4 +609,34 @@ pub fn parse_checksum(spec: &str) -> Result<(String, String)> {
         bail!("sha256 digest must be 64 hex characters");
     }
     Ok((algo, hex_value.to_string()))
+}
+
+/// Watch the database until the engine's row shows up, then register it as
+/// "owned by this window".
+async fn track_download_id(
+    storage: Storage,
+    url: String,
+    output: Option<PathBuf>,
+    owned: Arc<Mutex<HashSet<i64>>>,
+    slot: Arc<Mutex<Option<i64>>>,
+) {
+    for _ in 0..240 {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let found = match &output {
+            Some(path) => storage
+                .find_download_by_url_output(&url, path)
+                .ok()
+                .flatten(),
+            None => storage.list_downloads().ok().and_then(|rows| {
+                rows.into_iter()
+                    .filter(|r| r.url == url)
+                    .max_by_key(|r| r.updated_at)
+            }),
+        };
+        if let Some(row) = found {
+            owned.lock().unwrap().insert(row.id);
+            *slot.lock().unwrap() = Some(row.id);
+            return;
+        }
+    }
 }

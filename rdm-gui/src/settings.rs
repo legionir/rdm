@@ -30,6 +30,8 @@ pub struct AppSettings {
     /// Delete the assembled file too when removing.
     pub purge_on_remove: bool,
     pub dark_mode: bool,
+    /// Verbosity of the captured engine log (`off`..`trace`), like `-v/-vv/-vvv`.
+    pub log_level: String,
 }
 
 impl Default for AppSettings {
@@ -47,6 +49,7 @@ impl Default for AppSettings {
             confirm_remove: true,
             purge_on_remove: false,
             dark_mode: true,
+            log_level: "info".to_string(),
         }
     }
 }
@@ -87,6 +90,7 @@ impl AppSettings {
         out.push_str(&format!("confirm_remove = {}\n", self.confirm_remove));
         out.push_str(&format!("purge_on_remove = {}\n", self.purge_on_remove));
         out.push_str(&format!("dark_mode = {}\n", self.dark_mode));
+        out.push_str(&format!("log_level = \"{}\"\n", escape(&self.log_level)));
         out
     }
 
@@ -125,6 +129,11 @@ impl AppSettings {
                 "confirm_remove" => s.confirm_remove = value == "true",
                 "purge_on_remove" => s.purge_on_remove = value == "true",
                 "dark_mode" => s.dark_mode = value == "true",
+                "log_level" | "verbosity" => {
+                    if crate::logging::LEVELS.contains(&value) {
+                        s.log_level = value.to_string();
+                    }
+                }
                 _ => {}
             }
         }

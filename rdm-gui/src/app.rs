@@ -9,6 +9,7 @@ use egui::{Color32, Context, RichText};
 use rdm::models::DownloadState;
 
 use crate::backend::{Backend, BackendEvent};
+use crate::logging::LogControl;
 use crate::settings::SettingsStore;
 use crate::state::{DetailTab, GuiState, UiAction};
 use crate::util;
@@ -20,10 +21,17 @@ pub struct RdmGuiApp {
     last_poll: Instant,
     last_selected: Option<i64>,
     theme_applied: bool,
+    logging: Option<LogControl>,
+    log_level: String,
+    shutting_down: bool,
 }
 
 impl RdmGuiApp {
-    pub fn new(data_dir: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(
+        data_dir: PathBuf,
+        logging: Option<LogControl>,
+        forced_level: Option<&'static str>,
+    ) -> anyhow::Result<Self> {
         let backend = Backend::new(&data_dir)?;
         let mut settings = SettingsStore::new(&data_dir);
         // The command line wins over whatever the file says.
@@ -39,7 +47,19 @@ impl RdmGuiApp {
             last_poll: Instant::now(),
             last_selected: None,
             theme_applied: false,
+            logging,
+            log_level: String::new(),
+            shutting_down: false,
         };
+        // A `-v` flag on the command line wins over the settings file.
+        let level = match forced_level {
+            Some(level) => {
+                app.settings.settings_mut().log_level = level.to_string();
+                level.to_string()
+            }
+            None => app.settings.settings().log_level.clone(),
+        };
+        app.set_log_level(&level);
         app.state.push_log(
             "info",
             format!("metadata database: {}", app.backend.db_path().display()),
@@ -84,6 +104,35 @@ impl RdmGuiApp {
             self.state.chunks.clear();
             self.state.events.clear();
             self.state.json.clear();
+        }
+    }
+
+    /// Apply a verbosity directive to the tracing subscriber.
+    fn set_log_level(&mut self, level: &str) {
+        if self.log_level == level {
+            return;
+        }
+        self.log_level = level.to_string();
+        let Some(control) = self.logging.clone() else {
+            return;
+        };
+        match control.set_level(level) {
+            Ok(()) => self
+                .state
+                .push_log("info", format!("engine log level set to {level}")),
+            Err(err) => self
+                .state
+                .push_log("error", format!("invalid log level {level:?}: {err}")),
+        }
+    }
+
+    /// Move captured `tracing` output into the App log tab.
+    fn drain_engine_logs(&mut self) {
+        let Some(control) = self.logging.clone() else {
+            return;
+        };
+        for line in control.buffer().drain() {
+            self.state.push_engine_log(line.level, line.text);
         }
     }
 
@@ -312,6 +361,11 @@ impl eframe::App for RdmGuiApp {
         }
 
         self.drain_backend_events();
+        self.drain_engine_logs();
+        let wanted_level = self.settings.settings().log_level.clone();
+        if wanted_level != self.log_level {
+            self.set_log_level(&wanted_level);
+        }
         self.refresh(false);
 
         let mut actions: Vec<UiAction> = Vec::new();
@@ -399,6 +453,15 @@ impl eframe::App for RdmGuiApp {
             self.apply(action, ctx);
         }
 
+        if ctx.input(|i| i.viewport().close_requested()) && !self.shutting_down {
+            self.shutting_down = true;
+            let asked = self.backend.shutdown(Duration::from_secs(5));
+            if asked > 0 {
+                self.state
+                    .push_log("warn", format!("paused {asked} running download(s) on exit"));
+            }
+        }
+
         // Keep the window live while transfers are in flight.
         let busy = self.backend.active_jobs() > 0
             || self
@@ -408,6 +471,13 @@ impl eframe::App for RdmGuiApp {
                 .any(|r| r.state.active() || r.state == DownloadState::Merging);
         let refresh = self.settings.settings().refresh_ms.max(100);
         ctx.request_repaint_after(Duration::from_millis(if busy { refresh.min(500) } else { refresh }));
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if !self.shutting_down {
+            self.shutting_down = true;
+            self.backend.shutdown(Duration::from_secs(5));
+        }
     }
 }
 

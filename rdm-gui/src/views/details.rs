@@ -9,6 +9,14 @@ use crate::state::{DetailTab, GuiState, UiAction};
 use crate::util;
 use crate::views::download_list::{state_color, state_glyph};
 
+/// Log-pane filters: label plus the levels it keeps.
+const LOG_FILTERS: [(&str, &[&str]); 4] = [
+    ("all", &["error", "warn", "info", "debug", "trace"]),
+    ("info+", &["error", "warn", "info"]),
+    ("warn+", &["error", "warn"]),
+    ("errors", &["error"]),
+];
+
 pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
     let mut actions = Vec::new();
 
@@ -266,8 +274,18 @@ fn json(ui: &mut Ui, state: &GuiState, actions: &mut Vec<UiAction>) {
     );
 }
 
-fn log_tab(ui: &mut Ui, state: &GuiState, actions: &mut Vec<UiAction>) {
+fn log_tab(ui: &mut Ui, state: &mut GuiState, actions: &mut Vec<UiAction>) {
     ui.horizontal(|ui| {
+        ui.label("show:");
+        egui::ComboBox::from_id_salt("log-pane-filter")
+            .selected_text(LOG_FILTERS[state.log_filter.min(LOG_FILTERS.len() - 1)].0)
+            .width(110.0)
+            .show_ui(ui, |ui| {
+                for (idx, (label, _)) in LOG_FILTERS.iter().enumerate() {
+                    ui.selectable_value(&mut state.log_filter, idx, *label);
+                }
+            });
+        ui.separator();
         if ui.small_button("Clear").clicked() {
             actions.push(UiAction::ClearLog);
         }
@@ -282,23 +300,31 @@ fn log_tab(ui: &mut Ui, state: &GuiState, actions: &mut Vec<UiAction>) {
         }
     });
     ui.separator();
+    let allowed = LOG_FILTERS[state.log_filter.min(LOG_FILTERS.len() - 1)].1;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .stick_to_bottom(true)
         .id_salt("log-scroll")
         .show(ui, |ui| {
-            for line in &state.log {
+            for line in state.log.iter().filter(|l| allowed.contains(&l.level)) {
                 let color = match line.level {
                     "error" => Color32::from_rgb(239, 68, 68),
                     "warn" => Color32::from_rgb(245, 158, 11),
-                    _ => Color32::from_gray(170),
+                    "debug" | "trace" => Color32::from_gray(130),
+                    _ => Color32::from_gray(180),
                 };
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
                         RichText::new(util::format_timestamp(line.at))
                             .monospace()
                             .small()
-                            .color(Color32::from_gray(130)),
+                            .color(Color32::from_gray(120)),
+                    );
+                    ui.label(
+                        RichText::new(format!("{:<5}", line.level))
+                            .monospace()
+                            .small()
+                            .color(color),
                     );
                     ui.label(RichText::new(&line.text).small().color(color));
                 });

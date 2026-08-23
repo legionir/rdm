@@ -89,6 +89,17 @@ pub fn show(
             );
             ui.checkbox(&mut settings.dark_mode, "Dark theme");
 
+            ui.add_space(6.0);
+            ui.label("Engine log verbosity")
+                .on_hover_text("Same levels as the CLI's -v / -vv / -vvv; RUST_LOG still wins");
+            egui::ComboBox::from_id_salt("log-level")
+                .selected_text(settings.log_level.clone())
+                .show_ui(ui, |ui| {
+                    for level in crate::logging::LEVELS {
+                        ui.selectable_value(&mut settings.log_level, level.to_string(), level);
+                    }
+                });
+
             ui.add_space(10.0);
             ui.separator();
             ui.horizontal(|ui| {
