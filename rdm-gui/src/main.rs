@@ -26,6 +26,6 @@ fn run() -> Result<(), eframe::Error> {
     eframe::run_native(
         "rdm",
         options,
-        Box::new(|_cc| Box::new(app::RdmGuiApp::new())),
+        Box::new(|_cc| Ok(Box::new(app::RdmGuiApp::new()))),
     )
 }
