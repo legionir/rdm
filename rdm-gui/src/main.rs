@@ -26,6 +26,7 @@ fn run() -> Result<(), eframe::Error> {
     eframe::run_native(
         "rdm",
         options,
-        Box::new(|_cc| Box::new(app::RdmGuiApp::new())),
+        // eframe 0.29's AppCreator returns Result<Box<dyn App>, DynError>.
+        Box::new(|_cc| Ok(Box::new(app::RdmGuiApp::new()))),
     )
 }
