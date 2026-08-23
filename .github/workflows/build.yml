@@ -47,10 +47,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Disable vendored crates.io (Windows line endings break vendor checksums)
+        shell: bash
+        run: rm -f .cargo/config.toml .cargo/config
       - name: Build CLI binary
-        # Do not use vendor/ + --locked here. The lockfile/vendor tree was
-        # produced on Linux and is missing some Windows-only crates, so a
-        # vendored locked build fails before rustc even starts.
         run: cargo build --release
       - name: Stage CLI binary
         shell: bash
