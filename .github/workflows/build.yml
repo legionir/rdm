@@ -64,34 +64,62 @@ jobs:
           path: dist/rdm-windows-x86_64.exe
           if-no-files-found: error
 
-  build-gui:
+  build-gui-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Configure vendored sources
+      - name: Install native GUI libraries
         run: |
-          mkdir -p .cargo
-          cp vendor-config.txt .cargo/config.toml || true
-      - name: Build GUI binary (requires egui in vendor/network)
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libgtk-3-dev libx11-dev libxcb-render0-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev \
+            libgl1-mesa-dev
+      - name: Disable vendored crates.io (egui is not in vendor/)
+        run: rm -f .cargo/config.toml .cargo/config
+      - name: Build GUI binary
+        working-directory: rdm-gui
+        run: cargo build --release
+      - name: Stage GUI binary
         run: |
-          if cargo build --release --locked --features gui; then
-            mkdir -p dist
-            cp target/release/rdm dist/rdm-gui-linux-x86_64
-            chmod +x dist/rdm-gui-linux-x86_64
-          else
-            echo "GUI build skipped: egui/eframe dependencies not vendored or unavailable"
-          fi
-      - name: Upload GUI artifact (if built)
+          mkdir -p dist
+          cp rdm-gui/target/release/rdm-gui dist/rdm-gui-linux-x86_64
+          chmod +x dist/rdm-gui-linux-x86_64
+      - name: Upload GUI artifact
         uses: actions/upload-artifact@v4
         with:
           name: rdm-gui-linux-x86_64
           path: dist/rdm-gui-linux-x86_64
-          if-no-files-found: ignore
+          if-no-files-found: error
+
+  build-gui-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Disable vendored crates.io
+        shell: bash
+        run: rm -f .cargo/config.toml .cargo/config
+      - name: Build GUI binary
+        working-directory: rdm-gui
+        run: cargo build --release
+      - name: Stage GUI binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp rdm-gui/target/release/rdm-gui.exe dist/rdm-gui-windows-x86_64.exe
+      - name: Upload GUI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdm-gui-windows-x86_64.exe
+          path: dist/rdm-gui-windows-x86_64.exe
+          if-no-files-found: error
 
   release:
-    needs: [build-cli-linux, build-cli-windows, build-gui]
+    needs: [build-cli-linux, build-cli-windows, build-gui-linux, build-gui-windows]
     if: always() && !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.build-cli-linux.result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -117,6 +145,9 @@ jobs:
           fi
           if [[ -f artifacts/rdm-gui-linux-x86_64 ]]; then
             ASSETS+=(artifacts/rdm-gui-linux-x86_64)
+          fi
+          if [[ -f artifacts/rdm-gui-windows-x86_64.exe ]]; then
+            ASSETS+=(artifacts/rdm-gui-windows-x86_64.exe)
           fi
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
