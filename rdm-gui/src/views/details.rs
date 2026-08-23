@@ -90,7 +90,7 @@ fn overview(
         .min_col_width(130.0)
         .striped(true)
         .show(ui, |ui| {
-            let mut field = |ui: &mut Ui, key: &str, value: String| {
+            let field = |ui: &mut Ui, key: &str, value: String| {
                 ui.label(RichText::new(key).small().color(Color32::from_gray(150)));
                 ui.label(RichText::new(value).monospace().small());
                 ui.end_row();

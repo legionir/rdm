@@ -83,7 +83,8 @@ fn split_level(line: &str) -> (&'static str, &str) {
     ("info", trimmed)
 }
 
-struct BufferWriter {
+/// Writer handed to the `fmt` layer; appends whole lines to the buffer.
+pub struct BufferWriter {
     buffer: LogBuffer,
 }
 
