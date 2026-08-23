@@ -508,3 +508,56 @@ fn report(outcome: EngineOutcome) -> Result<u8> {
         }
     }
 }
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    #[test]
+    fn parse_checksum_valid_sha256() {
+        let spec = "sha256:aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899";
+        let (algo, hex) = parse_checksum(spec).unwrap();
+        assert_eq!(algo, "sha256");
+        assert_eq!(hex.len(), 64);
+    }
+
+    #[test]
+    fn parse_checksum_invalid_no_colon() {
+        assert!(parse_checksum("sha256bad").is_err());
+    }
+
+    #[test]
+    fn parse_checksum_invalid_short_hex() {
+        assert!(parse_checksum("sha256:dead").is_err());
+    }
+
+    #[test]
+    fn opts_parse_download_defaults() {
+        let opts = Opts::try_parse_from(["rdm", "download", "http://example.com/file.bin"]).unwrap();
+        assert!(matches!(opts.command, Command::Download(_)));
+        assert_eq!(opts.data_dir, PathBuf::from(".rdm"));
+    }
+
+    #[test]
+    fn opts_parse_list() {
+        let opts = Opts::try_parse_from(["rdm", "list"]).unwrap();
+        assert!(matches!(opts.command, Command::List(_)));
+    }
+
+    #[test]
+    fn opts_parse_resume_with_resume_flag() {
+        let opts = Opts::try_parse_from(["rdm", "download", "--resume", "http://example.com/f.bin"]).unwrap();
+        if let Command::Download(args) = opts.command {
+            assert!(args.resume);
+        } else {
+            panic!("expected Download");
+        }
+    }
+
+    #[test]
+    fn download_args_connections_range() {
+        use clap::Parser;
+        let args = DownloadArgs::parse_from(["http://x", "--connections", "16"]);
+        assert_eq!(args.connections, 16);
+    }
+}

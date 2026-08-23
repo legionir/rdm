@@ -232,3 +232,19 @@ mod tests {
         assert_eq!(r.header_value(), "bytes=0-1023");
     }
 }
+
+#[cfg(test)]
+mod extra_range_tests {
+    use super::*;
+
+    #[test]
+    fn byte_range_header_value() {
+        let r = ByteRange { start: 100, end: 299 };
+        assert_eq!(r.header_value(), "bytes=100-299");
+    }
+
+    #[test]
+    fn chunk_plan_empty_file() {
+        assert!(plan_chunks(0, 4, 1024).is_empty());
+    }
+}
