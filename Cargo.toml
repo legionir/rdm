@@ -35,10 +35,6 @@ tempfile = "3.15.0"
 
 [features]
 default = []
-# GUI sources are compiled with `--features gui` once egui/eframe are
-# added to Cargo.lock and vendor/. The feature flag stays so `#[cfg(feature = "gui")]`
-# modules keep compiling as a no-op until those crates are vendored.
-gui = []
 
 [profile.release]
 lto = "thin"

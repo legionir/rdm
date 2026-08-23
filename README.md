@@ -98,9 +98,30 @@ cargo build --release --manifest-path rdm-gui/Cargo.toml
 Run:
 
 ```bash
-./rdm-gui/target/release/rdm-gui          # Linux
-.\rdm-gui\target\release\rdm-gui.exe      # Windows
+./rdm-gui/target/release/rdm-gui                     # Linux
+./rdm-gui/target/release/rdm-gui --data-dir ~/.rdm   # pick another metadata dir
+.\rdm-gui\target\release\rdm-gui.exe                 # Windows
 ```
+
+`rdm-gui` is **standalone**: it links the `rdm` library and runs the download
+engine in-process, so the `rdm` binary does not need to be installed next to
+it. Both programs share `<data-dir>/metadata.db`, which means a download
+started in the terminal can be paused, resumed or removed from the window and
+vice versa.
+
+| CLI | GUI |
+| --- | --- |
+| `rdm download <URL> …` | **New download** dialog (output, connections, retries, chunk size, speed limit, timeout, checksum, user agent, resume/force) |
+| `rdm pause / resume / cancel <ID>` | ⏸ / ▶ / ⏹ row buttons, plus *Pause all* and *Resume all* |
+| `rdm download --force` | ⟲ *Restart* row button |
+| `rdm list [--state …]` | Download table with search box and state filter |
+| `rdm info <ID>` | **Overview**, **Chunks** and **Events** tabs of the detail panel |
+| `rdm info --json` | **JSON** tab (with *Copy JSON*) |
+| `rdm remove <ID> [--purge]` | 🗑 row button (confirmation + "delete file too") and *Clear completed* |
+| `--data-dir DIR` | `--data-dir` flag and the *Metadata directory* field in Settings |
+
+Defaults for new downloads live in `<data-dir>/settings.toml`; the window
+reloads that file automatically when it changes on disk.
 
 ## Run
 
