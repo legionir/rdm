@@ -23,6 +23,8 @@ pub struct AppSettings {
     pub max_speed: String,
     pub user_agent: String,
     pub timeout_secs: u64,
+    /// How many transfers may run at the same time (0 = unlimited).
+    pub max_concurrent: u32,
     /// How often the download table is re-read from SQLite.
     pub refresh_ms: u64,
     /// Ask before removing a record.
@@ -45,6 +47,7 @@ impl Default for AppSettings {
             max_speed: String::new(),
             user_agent: String::new(),
             timeout_secs: 30,
+            max_concurrent: 3,
             refresh_ms: 600,
             confirm_remove: true,
             purge_on_remove: false,
@@ -86,6 +89,7 @@ impl AppSettings {
         out.push_str(&format!("max_speed = \"{}\"\n", escape(&self.max_speed)));
         out.push_str(&format!("user_agent = \"{}\"\n", escape(&self.user_agent)));
         out.push_str(&format!("timeout_secs = {}\n", self.timeout_secs));
+        out.push_str(&format!("max_concurrent = {}\n", self.max_concurrent));
         out.push_str(&format!("refresh_ms = {}\n", self.refresh_ms));
         out.push_str(&format!("confirm_remove = {}\n", self.confirm_remove));
         out.push_str(&format!("purge_on_remove = {}\n", self.purge_on_remove));
@@ -124,6 +128,9 @@ impl AppSettings {
                 "user_agent" => s.user_agent = value.to_string(),
                 "timeout_secs" | "timeout" => {
                     s.timeout_secs = value.parse().unwrap_or(s.timeout_secs)
+                }
+                "max_concurrent" | "max_parallel" => {
+                    s.max_concurrent = value.parse().unwrap_or(s.max_concurrent).min(64)
                 }
                 "refresh_ms" => s.refresh_ms = value.parse::<u64>().unwrap_or(s.refresh_ms).clamp(100, 10_000),
                 "confirm_remove" => s.confirm_remove = value == "true",

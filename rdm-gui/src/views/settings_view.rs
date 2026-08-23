@@ -80,6 +80,10 @@ pub fn show(
             }
 
             ui.add_space(6.0);
+            ui.label("Max concurrent downloads")
+                .on_hover_text("0 = unlimited; extra jobs wait in the queue");
+            ui.add(egui::Slider::new(&mut settings.max_concurrent, 0..=16));
+
             ui.label("Table refresh (ms)");
             ui.add(egui::Slider::new(&mut settings.refresh_ms, 100..=5000));
             ui.checkbox(&mut settings.confirm_remove, "Confirm before removing");

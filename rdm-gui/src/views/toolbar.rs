@@ -4,7 +4,12 @@ use egui::{RichText, Ui};
 
 use crate::state::{GuiState, UiAction, ALL_STATES};
 
-pub fn show(ui: &mut Ui, state: &mut GuiState, active_jobs: usize) -> Vec<UiAction> {
+pub fn show(
+    ui: &mut Ui,
+    state: &mut GuiState,
+    active_jobs: usize,
+    queued: usize,
+) -> Vec<UiAction> {
     let mut actions = Vec::new();
 
     ui.horizontal_wrapped(|ui| {
@@ -44,6 +49,17 @@ pub fn show(ui: &mut Ui, state: &mut GuiState, active_jobs: usize) -> Vec<UiActi
         if active_jobs > 0 {
             ui.add(egui::Spinner::new().size(14.0));
             ui.label(format!("{active_jobs} running here"));
+        }
+        if queued > 0 {
+            ui.label(
+                RichText::new(format!("⏳ {queued} queued"))
+                    .small()
+                    .color(egui::Color32::from_rgb(245, 158, 11)),
+            )
+            .on_hover_text("Waiting for a free slot — see the Queue tab");
+            if ui.small_button("Clear queue").clicked() {
+                actions.push(UiAction::ClearQueue);
+            }
         }
     });
 

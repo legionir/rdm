@@ -50,6 +50,10 @@ pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
         log_tab(ui, state, &mut actions);
         return actions;
     }
+    if tab == DetailTab::Queue {
+        queue_tab(ui, state, &mut actions);
+        return actions;
+    }
 
     let Some(record) = state.selected_record().cloned() else {
         ui.label(
@@ -68,7 +72,7 @@ pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
             DetailTab::Chunks => chunks(ui, state),
             DetailTab::Events => events(ui, state),
             DetailTab::Json => json(ui, state, &mut actions),
-            DetailTab::Log => {}
+            DetailTab::Queue | DetailTab::Log => {}
         });
 
     actions
@@ -272,6 +276,59 @@ fn json(ui: &mut Ui, state: &GuiState, actions: &mut Vec<UiAction>) {
             .desired_rows(18)
             .interactive(false),
     );
+}
+
+fn queue_tab(ui: &mut Ui, state: &GuiState, actions: &mut Vec<UiAction>) {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!("{} job(s) waiting for a free slot", state.queue.len()))
+                .small(),
+        );
+        if !state.queue.is_empty() && ui.small_button("Clear queue").clicked() {
+            actions.push(UiAction::ClearQueue);
+        }
+    });
+    ui.separator();
+    if state.queue.is_empty() {
+        ui.label(
+            RichText::new("The queue is empty — new downloads start immediately.")
+                .italics()
+                .color(Color32::from_gray(150)),
+        );
+        return;
+    }
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .id_salt("queue-scroll")
+        .show(ui, |ui| {
+            egui::Grid::new("queue-grid")
+                .num_columns(4)
+                .striped(true)
+                .spacing([10.0, 4.0])
+                .show(ui, |ui| {
+                    for head in ["#", "URL", "OUTPUT", ""] {
+                        ui.label(RichText::new(head).small().strong());
+                    }
+                    ui.end_row();
+                    for (position, job) in state.queue.iter().enumerate() {
+                        ui.label(RichText::new(format!("{}", position + 1)).monospace().small());
+                        ui.label(RichText::new(&job.url).small());
+                        ui.label(
+                            RichText::new(if job.output.is_empty() {
+                                "(default directory)"
+                            } else {
+                                job.output.as_str()
+                            })
+                            .small()
+                            .color(Color32::from_gray(150)),
+                        );
+                        if ui.small_button("✕").on_hover_text("Drop from queue").clicked() {
+                            actions.push(UiAction::CancelPending(job.seq));
+                        }
+                        ui.end_row();
+                    }
+                });
+        });
 }
 
 fn log_tab(ui: &mut Ui, state: &mut GuiState, actions: &mut Vec<UiAction>) {

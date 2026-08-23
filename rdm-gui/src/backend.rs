@@ -18,9 +18,9 @@
 //! CLI uses, which means a GUI can steer a download started from a terminal
 //! and vice versa.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -71,6 +71,18 @@ impl Default for StartRequest {
     }
 }
 
+/// A transfer waiting for a free slot. It has no database row yet — the
+/// engine creates that when the job actually starts.
+#[derive(Debug, Clone)]
+pub struct PendingJob {
+    pub seq: u64,
+    pub label: String,
+    pub url: String,
+    pub output: String,
+    opts: EngineOptions,
+    key: String,
+}
+
 /// Message pushed from a background job to the UI thread.
 #[derive(Debug, Clone)]
 pub enum BackendEvent {
@@ -101,6 +113,9 @@ pub struct Backend {
     /// touched on shutdown; transfers driven by a CLI in another terminal are
     /// left alone.
     owned: Arc<Mutex<HashSet<i64>>>,
+    /// FIFO of transfers waiting for a free concurrency slot.
+    queue: Arc<Mutex<VecDeque<PendingJob>>>,
+    next_seq: AtomicU64,
 }
 
 impl Backend {
@@ -121,6 +136,8 @@ impl Backend {
             active: Arc::new(AtomicUsize::new(0)),
             launching: Arc::new(Mutex::new(HashSet::new())),
             owned: Arc::new(Mutex::new(HashSet::new())),
+            queue: Arc::new(Mutex::new(VecDeque::new())),
+            next_seq: AtomicU64::new(1),
         })
     }
 
@@ -153,6 +170,7 @@ impl Backend {
     /// Downloads started elsewhere (another window, a terminal) are never
     /// touched.
     pub fn shutdown(&self, grace: Duration) -> usize {
+        self.clear_queue();
         let ids: Vec<i64> = {
             let guard = self.owned.lock().unwrap();
             guard.iter().copied().collect()
@@ -230,16 +248,17 @@ impl Backend {
 
     // ----------------------------------------------------------- write side
 
-    /// `rdm download <URL> [options]`
-    pub fn start_download(&self, req: &StartRequest) -> Result<()> {
+    /// `rdm download <URL> [options]` — the job is queued and started as soon
+    /// as a concurrency slot is free.
+    pub fn start_download(&self, req: &StartRequest, max_concurrent: usize) -> Result<u64> {
         let opts = self.engine_options(req)?;
         let label = req.url.clone();
-        self.spawn_engine(opts, label)
+        self.enqueue(opts, label, max_concurrent)
     }
 
     /// `rdm resume <ID>` — reuses the stored URL/output/connection count and
     /// lets the caller override the transfer knobs (the CLI cannot do that).
-    pub fn resume(&self, id: i64, defaults: &StartRequest) -> Result<()> {
+    pub fn resume(&self, id: i64, defaults: &StartRequest, max_concurrent: usize) -> Result<u64> {
         let row = self.require(id)?;
         match row.state {
             DownloadState::Completed => {
@@ -277,11 +296,11 @@ impl Backend {
         let mut opts = self.engine_options(&req)?;
         // The stored output path is already a concrete file.
         opts.output = Some(PathBuf::from(&row.output_path));
-        self.spawn_engine(opts, row.public_id.clone())
+        self.enqueue(opts, row.public_id.clone(), max_concurrent)
     }
 
     /// `rdm download --force` on an existing record: wipe chunks and refetch.
-    pub fn restart(&self, id: i64, defaults: &StartRequest) -> Result<()> {
+    pub fn restart(&self, id: i64, defaults: &StartRequest, max_concurrent: usize) -> Result<u64> {
         let row = self.require(id)?;
         if row.state.active() {
             bail!(
@@ -300,7 +319,7 @@ impl Backend {
         };
         let mut opts = self.engine_options(&req)?;
         opts.output = Some(PathBuf::from(&row.output_path));
-        self.spawn_engine(opts, row.public_id.clone())
+        self.enqueue(opts, row.public_id.clone(), max_concurrent)
     }
 
     /// `rdm pause <ID>`
@@ -396,7 +415,7 @@ impl Backend {
     }
 
     /// Bulk helper: resume everything that is paused/interrupted/failed.
-    pub fn resume_all(&self, defaults: &StartRequest) -> Result<usize> {
+    pub fn resume_all(&self, defaults: &StartRequest, max_concurrent: usize) -> Result<usize> {
         let mut n = 0;
         for row in self.list()? {
             let restartable = matches!(
@@ -404,7 +423,7 @@ impl Backend {
                 DownloadState::Paused | DownloadState::Interrupted | DownloadState::Failed
             );
             if restartable {
-                self.resume(row.id, defaults)?;
+                self.resume(row.id, defaults, max_concurrent)?;
                 n += 1;
             }
         }
@@ -483,21 +502,87 @@ impl Backend {
         })
     }
 
-    fn spawn_engine(&self, opts: EngineOptions, label: String) -> Result<()> {
-        let key = format!(
-            "{}\u{1}{}",
-            opts.url,
-            opts.output
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default()
-        );
+    // ------------------------------------------------------------ scheduling
+
+    /// Put a job in the queue and start it if a slot is free.
+    ///
+    /// `max_concurrent == 0` means "no limit".
+    fn enqueue(&self, opts: EngineOptions, label: String, max_concurrent: usize) -> Result<u64> {
+        let key = job_key(&opts);
         {
             let mut launching = self.launching.lock().unwrap();
             if !launching.insert(key.clone()) {
-                bail!("that download is already starting");
+                bail!("that download is already queued or running");
             }
         }
+        let seq = self.next_seq.fetch_add(1, Ordering::SeqCst);
+        let job = PendingJob {
+            seq,
+            label,
+            url: opts.url.clone(),
+            output: opts
+                .output
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            opts,
+            key,
+        };
+        self.queue.lock().unwrap().push_back(job);
+        self.pump(max_concurrent);
+        Ok(seq)
+    }
+
+    /// Start queued jobs while the concurrency budget allows it. Cheap enough
+    /// to call once per frame.
+    pub fn pump(&self, max_concurrent: usize) -> usize {
+        let mut started = 0usize;
+        loop {
+            if max_concurrent > 0 && self.active_jobs() >= max_concurrent {
+                break;
+            }
+            let job = match self.queue.lock().unwrap().pop_front() {
+                Some(job) => job,
+                None => break,
+            };
+            self.spawn_engine(job);
+            started += 1;
+        }
+        started
+    }
+
+    /// Jobs still waiting for a slot, in run order.
+    pub fn pending(&self) -> Vec<PendingJob> {
+        self.queue.lock().unwrap().iter().cloned().collect()
+    }
+
+    pub fn pending_len(&self) -> usize {
+        self.queue.lock().unwrap().len()
+    }
+
+    /// Drop one waiting job (it never touched the database).
+    pub fn cancel_pending(&self, seq: u64) -> Option<PendingJob> {
+        let mut queue = self.queue.lock().unwrap();
+        let idx = queue.iter().position(|job| job.seq == seq)?;
+        let job = queue.remove(idx)?;
+        self.launching.lock().unwrap().remove(&job.key);
+        Some(job)
+    }
+
+    /// Drop every waiting job; running transfers are untouched.
+    pub fn clear_queue(&self) -> usize {
+        let drained: Vec<PendingJob> = self.queue.lock().unwrap().drain(..).collect();
+        let mut launching = self.launching.lock().unwrap();
+        for job in &drained {
+            launching.remove(&job.key);
+        }
+        drained.len()
+    }
+
+    fn spawn_engine(&self, job: PendingJob) {
+        let PendingJob {
+            opts, label, key, ..
+        } = job;
         let tx = self.tx.clone();
         let active = Arc::clone(&self.active);
         let launching = Arc::clone(&self.launching);
@@ -565,8 +650,19 @@ impl Backend {
             };
             let _ = tx.send(event);
         });
-        Ok(())
     }
+}
+
+/// De-duplication key for a job: the URL plus its resolved output (if known).
+fn job_key(opts: &EngineOptions) -> String {
+    format!(
+        "{}\u{1}{}",
+        opts.url,
+        opts.output
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default()
+    )
 }
 
 fn open_storage(data_dir: &Path) -> Result<Storage> {

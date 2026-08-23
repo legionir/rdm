@@ -25,6 +25,8 @@ pub enum UiAction {
     ResumeAll,
     RemoveCompleted,
     CopyToClipboard(String),
+    CancelPending(u64),
+    ClearQueue,
     OpenOutputFolder(i64),
     SaveSettings,
     ReloadSettings,
@@ -39,15 +41,17 @@ pub enum DetailTab {
     Chunks,
     Events,
     Json,
+    Queue,
     Log,
 }
 
 impl DetailTab {
-    pub const ALL: [DetailTab; 5] = [
+    pub const ALL: [DetailTab; 6] = [
         DetailTab::Overview,
         DetailTab::Chunks,
         DetailTab::Events,
         DetailTab::Json,
+        DetailTab::Queue,
         DetailTab::Log,
     ];
 
@@ -57,6 +61,7 @@ impl DetailTab {
             DetailTab::Chunks => "Chunks",
             DetailTab::Events => "Events",
             DetailTab::Json => "JSON",
+            DetailTab::Queue => "Queue",
             DetailTab::Log => "App log",
         }
     }
@@ -130,6 +135,8 @@ pub struct GuiState {
     pub settings_dirty: bool,
     /// Hide log lines below this level in the App log tab.
     pub log_filter: usize,
+    /// Snapshot of the backend queue, refreshed every frame.
+    pub queue: Vec<crate::backend::PendingJob>,
 }
 
 impl GuiState {
@@ -155,6 +162,7 @@ impl GuiState {
             data_dir_input: data_dir,
             settings_dirty: false,
             log_filter: 0,
+            queue: Vec::new(),
         }
     }
 

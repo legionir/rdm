@@ -161,8 +161,9 @@ impl RdmGuiApp {
             }
             UiAction::SubmitNewDownload => {
                 let request = self.state.form.clone();
-                match self.backend.start_download(&request) {
-                    Ok(()) => {
+                let limit = self.max_concurrent();
+                match self.backend.start_download(&request, limit) {
+                    Ok(_) => {
                         self.state.show_add = false;
                         self.state.form_error = None;
                         self.state.form.url.clear();
@@ -180,15 +181,17 @@ impl RdmGuiApp {
             UiAction::Cancel(id) => self.report(self.backend.cancel(id)),
             UiAction::Resume(id) => {
                 let defaults = self.settings.settings().to_request();
-                match self.backend.resume(id, &defaults) {
-                    Ok(()) => self.state.push_log("info", format!("resuming #{id}")),
+                let limit = self.max_concurrent();
+                match self.backend.resume(id, &defaults, limit) {
+                    Ok(_) => self.state.push_log("info", format!("resuming #{id}")),
                     Err(err) => self.state.push_log("error", format!("{err:#}")),
                 }
             }
             UiAction::Restart(id) => {
                 let defaults = self.settings.settings().to_request();
-                match self.backend.restart(id, &defaults) {
-                    Ok(()) => self
+                let limit = self.max_concurrent();
+                match self.backend.restart(id, &defaults, limit) {
+                    Ok(_) => self
                         .state
                         .push_log("warn", format!("restarting #{id} from scratch")),
                     Err(err) => self.state.push_log("error", format!("{err:#}")),
@@ -231,7 +234,8 @@ impl RdmGuiApp {
             },
             UiAction::ResumeAll => {
                 let defaults = self.settings.settings().to_request();
-                match self.backend.resume_all(&defaults) {
+                let limit = self.max_concurrent();
+                match self.backend.resume_all(&defaults, limit) {
                     Ok(n) => self.state.push_log("info", format!("resuming {n} download(s)")),
                     Err(err) => self.state.push_log("error", format!("{err:#}")),
                 }
@@ -296,8 +300,24 @@ impl RdmGuiApp {
                     Err(err) => self.state.push_log("error", format!("{err:#}")),
                 }
             }
+            UiAction::CancelPending(seq) => match self.backend.cancel_pending(seq) {
+                Some(job) => self
+                    .state
+                    .push_log("warn", format!("removed {} from the queue", job.url)),
+                None => self.state.push_log("warn", "that job already started"),
+            },
+            UiAction::ClearQueue => {
+                let n = self.backend.clear_queue();
+                self.state
+                    .push_log("warn", format!("dropped {n} queued job(s)"));
+            }
             UiAction::ClearLog => self.state.log.clear(),
         }
+    }
+
+    /// 0 means "no limit".
+    fn max_concurrent(&self) -> usize {
+        self.settings.settings().max_concurrent as usize
     }
 
     fn report(&mut self, result: anyhow::Result<String>) {
@@ -360,6 +380,14 @@ impl eframe::App for RdmGuiApp {
                 .push_log("info", "settings.toml changed on disk — reloaded");
         }
 
+        let limit = self.max_concurrent();
+        let started = self.backend.pump(limit);
+        if started > 0 {
+            self.state
+                .push_log("info", format!("started {started} queued download(s)"));
+        }
+        self.state.queue = self.backend.pending();
+
         self.drain_backend_events();
         self.drain_engine_logs();
         let wanted_level = self.settings.settings().log_level.clone();
@@ -370,6 +398,7 @@ impl eframe::App for RdmGuiApp {
 
         let mut actions: Vec<UiAction> = Vec::new();
         let active_jobs = self.backend.active_jobs();
+        let queued = self.state.queue.len();
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.add_space(4.0);
@@ -389,7 +418,12 @@ impl eframe::App for RdmGuiApp {
                 });
             });
             ui.add_space(2.0);
-            actions.extend(crate::views::toolbar::show(ui, &mut self.state, active_jobs));
+            actions.extend(crate::views::toolbar::show(
+                ui,
+                &mut self.state,
+                active_jobs,
+                queued,
+            ));
             ui.add_space(4.0);
         });
 
@@ -464,6 +498,7 @@ impl eframe::App for RdmGuiApp {
 
         // Keep the window live while transfers are in flight.
         let busy = self.backend.active_jobs() > 0
+            || !self.state.queue.is_empty()
             || self
                 .state
                 .downloads
