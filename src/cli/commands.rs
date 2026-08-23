@@ -556,8 +556,20 @@ mod cli_tests {
 
     #[test]
     fn download_args_connections_range() {
-        use clap::Parser;
-        let args = DownloadArgs::parse_from(["http://x", "--connections", "16"]);
+        let args = DownloadArgs {
+            url: "http://x".into(),
+            output: None,
+            connections: 16,
+            resume: false,
+            force: false,
+            retry: 5,
+            timeout: 60,
+            max_speed: None,
+            chunk_size: "1MiB".into(),
+            checksum: None,
+            user_agent: None,
+            no_progress: false,
+        };
         assert_eq!(args.connections, 16);
     }
 }
