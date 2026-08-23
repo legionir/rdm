@@ -1,0 +1,3 @@
+# Keep vendored crate checksums stable on Windows checkouts.
+# CRLF conversion changes file hashes and cargo rejects the vendor tree.
+vendor/** -text
