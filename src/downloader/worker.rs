@@ -6,6 +6,7 @@
 //! The engine can push `Adjust` (dynamic chunk split) and `Cancel` commands
 //! while a transfer is in flight.
 
+use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
