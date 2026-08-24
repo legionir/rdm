@@ -1,6 +1,7 @@
-//! Top toolbar: add, bulk controls, search and state filter.
+//! Top toolbar: add, bulk controls, search, state filter and the sidebar
+//! toggles for Queue and Settings.
 
-use egui::{RichText, Ui};
+use egui::{Align, Color32, Layout, RichText, Ui};
 
 use crate::state::{GuiState, UiAction, ALL_STATES};
 
@@ -54,21 +55,48 @@ pub fn show(
             ui.label(
                 RichText::new(format!("⏳ {queued} queued"))
                     .small()
-                    .color(egui::Color32::from_rgb(245, 158, 11)),
+                    .color(Color32::from_rgb(217, 119, 6)),
             )
-            .on_hover_text("Waiting for a free slot — see the Queue tab");
+            .on_hover_text("Waiting for a free slot — open the Queue sidebar");
             if ui.small_button("Clear queue").clicked() {
                 actions.push(UiAction::ClearQueue);
             }
         }
+
+        // Sidebar toggles, pinned to the right edge.
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui
+                .add(
+                    egui::Button::new(RichText::new("⚙  Settings"))
+                        .selected(state.show_settings),
+                )
+                .on_hover_text("Toggle the settings sidebar")
+                .clicked()
+            {
+                state.show_settings = !state.show_settings;
+            }
+            if ui
+                .add(
+                    egui::Button::new(RichText::new("☰  Queue"))
+                        .selected(state.show_queue),
+                )
+                .on_hover_text("Toggle the queue sidebar")
+                .clicked()
+            {
+                state.show_queue = !state.show_queue;
+            }
+        });
     });
+
+    ui.add_space(6.0);
 
     ui.horizontal_wrapped(|ui| {
         ui.label("Search:");
         ui.add(
             egui::TextEdit::singleline(&mut state.filter_text)
                 .hint_text("file, id or url")
-                .desired_width(220.0),
+                .desired_width(220.0)
+                .margin(egui::Margin::symmetric(6.0, 4.0)),
         );
         if ui.small_button("✕").clicked() {
             state.filter_text.clear();
@@ -90,12 +118,10 @@ pub fn show(
             ui.checkbox(&mut state.show_completed, "show completed");
         }
         ui.separator();
-        let (done, waiting, running, failed, cancelled) = state.counts();
         ui.label(
-            RichText::new(format!(
-                "✔ {done}   ⏸ {waiting}   ▶ {running}   ✖ {failed}   ⃠ {cancelled}"
-            ))
-            .monospace(),
+            RichText::new("Double-click a row for details")
+                .small()
+                .color(ui.visuals().weak_text_color()),
         );
     });
 

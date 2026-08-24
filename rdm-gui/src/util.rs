@@ -1,5 +1,6 @@
 //! Small formatting helpers (no chrono dependency).
 
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// `1970-01-01 00:00:00 UTC` style rendering of an epoch-millisecond stamp.
@@ -103,6 +104,32 @@ pub fn open_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
         c
     };
     cmd.spawn().map(|_| ())
+}
+
+/// Interpret a text-field value as an existing directory, if it is one.
+pub fn existing_dir(text: &str) -> Option<PathBuf> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(trimmed);
+    if path.is_dir() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+/// Open the OS file explorer's folder picker and return the chosen directory.
+///
+/// Blocks while the dialog is open (the native Explorer / zenity dialog runs
+/// modally). Returns `None` when the user cancels.
+pub fn pick_folder(start: Option<&std::path::Path>, title: &str) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new().set_title(title);
+    if let Some(dir) = start {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.pick_folder()
 }
 
 #[cfg(test)]

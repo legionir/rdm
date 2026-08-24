@@ -8,6 +8,10 @@
 //! rdm-gui [--data-dir <DIR>]
 //! ```
 
+// Native GUI app: on Windows do not open a console window alongside the app
+// (and do not die when that console is closed).
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 mod app;
 mod backend;
 mod logging;
@@ -87,14 +91,13 @@ fn run(
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 760.0])
             .with_min_inner_size([860.0, 560.0])
-            .with_title("rdm — Rust Download Manager"),
+            .with_title("RDM"),
         ..Default::default()
     };
     eframe::run_native(
-        "rdm",
+        "RDM",
         options,
-        Box::new(move |cc| {
-            cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        Box::new(move |_cc| {
             match app::RdmGuiApp::new(data_dir.clone(), logging.clone(), forced_level) {
                 Ok(app) => Ok(Box::new(app) as Box<dyn eframe::App>),
                 Err(err) => Err(Box::<dyn std::error::Error + Send + Sync>::from(format!(
