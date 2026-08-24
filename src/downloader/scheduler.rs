@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::{bail, Result};
 
 use crate::downloader::chunk::{ChunkSpec, ChunkState};
-use crate::models::{ChunkRecord, DownloadRecord};
+use crate::models::{ChunkRecord, ChunkStatus, DownloadRecord};
 use crate::network::range::{plan_chunks, ByteRange};
 use crate::storage::metadata::chunk_file;
 
@@ -46,7 +46,7 @@ pub fn plan(
 
 /// Rebuild live chunk state from database rows (resume path).
 pub fn from_records(records: &[ChunkRecord]) -> Vec<ChunkState> {
-    records
+    let mut states: Vec<ChunkState> = records
         .iter()
         .map(|r| {
             let spec = ChunkSpec::ranged(
@@ -61,12 +61,25 @@ pub fn from_records(records: &[ChunkRecord]) -> Vec<ChunkState> {
             );
             let mut state = ChunkState::new(spec);
             state.downloaded = r.downloaded as u64;
-            state.status = r.status;
+            // A resumed session starts with no workers: everything that was
+            // left `active` (the engine exits before the workers' Cancelled
+            // events are drained on pause) or `failed` must go back to the
+            // pending pool, or it would never be scheduled again.
+            state.status = if r.status == ChunkStatus::Completed {
+                ChunkStatus::Completed
+            } else {
+                ChunkStatus::Pending
+            };
             state.retries = r.retries as u32;
             state.error = r.error.clone();
             state
         })
-        .collect()
+        .collect();
+    // Dynamic-split children carry idx values (parent_idx + 10_000 + n) that
+    // do not follow byte order; sort by range start so scheduling, the UI and
+    // the final assembly all see file order.
+    states.sort_by_key(|s| s.spec.range.start);
+    states
 }
 
 /// Number of bytes durable across all chunks (used for metadata).

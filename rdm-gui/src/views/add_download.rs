@@ -3,6 +3,9 @@
 use egui::{Context, RichText};
 
 use crate::state::{GuiState, UiAction};
+use crate::util;
+
+const EDIT_MARGIN: egui::Margin = egui::Margin::symmetric(6.0, 4.0);
 
 pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
     let mut actions = Vec::new();
@@ -17,29 +20,44 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
-        .default_width(560.0)
+        .default_width(580.0)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
             egui::Grid::new("add-form")
                 .num_columns(2)
-                .spacing([12.0, 8.0])
+                .spacing([12.0, 10.0])
                 .min_col_width(120.0)
                 .show(ui, |ui| {
                     ui.label("URL");
                     ui.add(
                         egui::TextEdit::singleline(&mut state.form.url)
                             .hint_text("https://example.com/file.zip")
+                            .margin(EDIT_MARGIN)
                             .desired_width(380.0),
                     );
                     ui.end_row();
 
                     ui.label("Output")
                         .on_hover_text("File path or directory. Empty = current directory.");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut state.form.output)
-                            .hint_text("directory or full file path")
-                            .desired_width(380.0),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut state.form.output)
+                                .hint_text("directory or full file path")
+                                .margin(EDIT_MARGIN)
+                                .desired_width(330.0),
+                        );
+                        if ui
+                            .button("📂")
+                            .on_hover_text("Choose a folder in the system file explorer")
+                            .clicked()
+                        {
+                            let start = util::existing_dir(&state.form.output);
+                            if let Some(dir) = util::pick_folder(start.as_deref(), "Output folder")
+                            {
+                                state.form.output = dir.display().to_string();
+                            }
+                        }
+                    });
                     ui.end_row();
 
                     ui.label("Connections")
@@ -55,6 +73,7 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     ui.add(
                         egui::TextEdit::singleline(&mut state.form.chunk_size)
                             .hint_text("1MiB")
+                            .margin(EDIT_MARGIN)
                             .desired_width(160.0),
                     );
                     ui.end_row();
@@ -64,6 +83,7 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     ui.add(
                         egui::TextEdit::singleline(&mut state.form.max_speed)
                             .hint_text("unlimited")
+                            .margin(EDIT_MARGIN)
                             .desired_width(160.0),
                     );
                     ui.end_row();
@@ -77,6 +97,7 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     ui.add(
                         egui::TextEdit::singleline(&mut state.form.checksum)
                             .hint_text("sha256:…")
+                            .margin(EDIT_MARGIN)
                             .desired_width(380.0),
                     );
                     ui.end_row();
@@ -85,6 +106,7 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     ui.add(
                         egui::TextEdit::singleline(&mut state.form.user_agent)
                             .hint_text("rdm/0.1.0")
+                            .margin(EDIT_MARGIN)
                             .desired_width(380.0),
                     );
                     ui.end_row();
@@ -100,11 +122,11 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                 });
 
             if let Some(err) = &state.form_error {
-                ui.add_space(4.0);
-                ui.colored_label(egui::Color32::from_rgb(239, 68, 68), err);
+                ui.add_space(6.0);
+                ui.colored_label(egui::Color32::from_rgb(220, 38, 38), err);
             }
 
-            ui.add_space(8.0);
+            ui.add_space(10.0);
             ui.separator();
             ui.horizontal(|ui| {
                 if ui.button(RichText::new("Start").strong()).clicked() {

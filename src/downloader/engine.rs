@@ -745,14 +745,13 @@ impl Engine {
             cursor = end + 1;
         }
         let total: u64 = ranges.iter().map(|(s, e, _)| e - s + 1).sum();
-        let chunks: Vec<(i64, PathBuf)> = table
-            .states()
-            .iter()
-            .map(|c| (c.spec.idx, c.spec.file_path.clone()))
-            .collect();
-        info!(?chunks, total, "finish: merging");
+        // Merge in BYTE order: dynamic splits append children at the end of
+        // the chunk table while their range sits mid-file, so table order is
+        // not necessarily assembly order.
+        let ordered: Vec<PathBuf> = ranges.iter().map(|(_, _, p)| (*p).clone()).collect();
+        info!(chunks = ordered.len(), total, "finish: merging");
 
-        let report = merge_chunks(chunks.into_iter().map(|(_, p)| p), output, total).await?;
+        let report = merge_chunks(ordered, output, total).await?;
         info!(size = report.bytes, "assembled file");
 
         if let Some((algo, expected)) = &self.opts.checksum {

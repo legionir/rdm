@@ -23,6 +23,12 @@ struct ServerOptions {
     truncate_first: usize,
     /// If true, the server does not advertise/support ranges (always 200).
     no_range: bool,
+    /// Sleep this long between 64 KiB body writes (throttles transfers so
+    /// tests can pause them mid-stream).
+    pace: Option<Duration>,
+    /// `(range_start, delay)`: stall any ranged request that starts exactly at
+    /// `range_start` before responding (deterministic dynamic-split setup).
+    stall: Option<(u64, Duration)>,
     /// Number of requests handled so far.
     requests: Arc<Mutex<usize>>,
 }
@@ -101,6 +107,13 @@ async fn serve(sock: &mut TcpStream, data: &[u8], opts: &ServerOptions) -> std::
         }
     }
     *opts.requests.lock().unwrap() += 1;
+    if let Some((stall_start, delay)) = opts.stall {
+        if let Some((s, _)) = range {
+            if s == stall_start {
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
 
     let (status, start, end) = if data.is_empty() {
         // Empty resource: HEAD/GET without range -> 200 (len 0); ranged -> 416.
@@ -168,6 +181,9 @@ async fn serve(sock: &mut TcpStream, data: &[u8], opts: &ServerOptions) -> std::
         let n = (slice.len() - written).min(64 * 1024);
         sock.write_all(&slice[written..written + n]).await?;
         written += n;
+        if let Some(pace) = opts.pace {
+            tokio::time::sleep(pace).await;
+        }
     }
     Ok(())
 }
@@ -226,6 +242,8 @@ async fn segmented_download_matches_payload() {
             truncate_at: None,
             truncate_first: 0,
             no_range: false,
+            pace: None,
+            stall: None,
             requests: Arc::new(Mutex::new(0)),
         },
     )
@@ -260,6 +278,8 @@ async fn resume_after_premature_disconnect() {
             truncate_at: Some(64 * 1024),
             truncate_first: 2,
             no_range: false,
+            pace: None,
+            stall: None,
             requests: Arc::new(Mutex::new(0)),
         },
     )
@@ -302,6 +322,8 @@ async fn pause_preserves_chunks_and_resume_continues() {
             truncate_at: Some(64 * 1024),
             truncate_first: 2,
             no_range: false,
+            pace: None,
+            stall: None,
             requests: Arc::new(Mutex::new(0)),
         },
     )
@@ -349,6 +371,8 @@ async fn single_stream_fallback_when_server_has_no_ranges() {
             truncate_at: None,
             truncate_first: 0,
             no_range: true,
+            pace: None,
+            stall: None,
             requests: Arc::new(Mutex::new(0)),
         },
     )
@@ -372,6 +396,8 @@ async fn checksum_verification() {
             truncate_at: None,
             truncate_first: 0,
             no_range: false,
+            pace: None,
+            stall: None,
             requests: Arc::new(Mutex::new(0)),
         },
     )
@@ -411,6 +437,8 @@ async fn zero_byte_file() {
             truncate_at: None,
             truncate_first: 0,
             no_range: false,
+            pace: None,
+            stall: None,
             requests: Arc::new(Mutex::new(0)),
         },
     )
@@ -425,5 +453,156 @@ async fn zero_byte_file() {
     assert_eq!(outcome.bytes, 0);
     assert!(out.exists());
     assert_eq!(std::fs::metadata(&out).unwrap().len(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Regression test for the pause/resume corruption: a chunk resumed at
+/// `offset > 0` must APPEND to its chunk file, not overwrite it from
+/// position 0, and the resumed session must re-schedule chunks that were
+/// left `active` in the database by the pause.
+#[tokio::test]
+async fn pause_resume_mid_transfer_preserves_content() {
+    let data = Arc::new(payload(16 * 1024 * 1024));
+    let server = TestServer::start(
+        data.clone(),
+        ServerOptions {
+            truncate_at: None,
+            truncate_first: 0,
+            no_range: false,
+            pace: Some(Duration::from_millis(10)),
+            stall: None,
+            requests: Arc::new(Mutex::new(0)),
+        },
+    )
+    .await;
+    let dir = test_dir("pausemid");
+    let out = dir.join("file.bin");
+    let data_dir = dir.join("data");
+    let url = server.url("/file.bin");
+
+    // One connection => a single 16 MiB chunk; the paced server keeps the
+    // transfer in flight long enough to pause it mid-stream.
+    let first = tokio::spawn(run_engine(url.clone(), out.clone(), data_dir.clone(), |o| {
+        o.connections = 1;
+    }));
+
+    // Wait for durable progress, then pause through the control channel —
+    // exactly what the GUI's Pause button does.
+    let storage = rdm::storage::database::Storage::open(&data_dir.join("metadata.db")).unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let id = loop {
+        if let Ok(Some(row)) = storage.find_download_by_url_output(&url, &out) {
+            break row.id;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "download row never appeared"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    };
+    loop {
+        let durable: i64 = storage
+            .get_chunks(id)
+            .unwrap()
+            .iter()
+            .map(|c| c.downloaded)
+            .sum();
+        if durable > 1024 * 1024 {
+            storage
+                .update_state(id, rdm::models::DownloadState::Paused, None)
+                .unwrap();
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no durable progress");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let outcome1 = tokio::time::timeout(Duration::from_secs(60), first)
+        .await
+        .expect("paused run timed out")
+        .expect("first run failed");
+    assert_eq!(outcome1.state, rdm::models::DownloadState::Paused);
+
+    // Every partial chunk file must be a byte-exact slice of the payload.
+    for c in storage.get_chunks(id).unwrap() {
+        if c.downloaded > 0 {
+            let buf = std::fs::read(&c.file_path).unwrap();
+            assert_eq!(buf.len() as i64, c.downloaded, "chunk file length");
+            let start = c.start as usize;
+            assert_eq!(
+                &buf[..],
+                &data.as_slice()[start..start + buf.len()],
+                "partial chunk must match the payload"
+            );
+        }
+    }
+
+    // Resume with 8 connections: the >4 MiB remainder gets split dynamically
+    // (children are appended out of idx order) and must still assemble
+    // byte-for-byte.
+    let outcome2 = tokio::time::timeout(
+        Duration::from_secs(60),
+        run_engine(url.clone(), out.clone(), data_dir.clone(), |o| {
+            o.resume = true;
+            o.connections = 8;
+        }),
+    )
+    .await
+    .expect("resume timed out")
+    .expect("resume failed");
+    assert_eq!(outcome2.state, rdm::models::DownloadState::Completed);
+    let got = std::fs::read(&out).unwrap();
+    assert_eq!(got.len(), data.len());
+    assert_eq!(got, *data, "resumed download must match byte-for-byte");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Regression test for merge order after a dynamic split: split children sit
+/// at the END of the chunk table while their byte range is mid-file, so the
+/// final assembly must order chunks by range, not by table position.
+#[tokio::test]
+async fn split_chunks_merge_in_byte_order() {
+    let data = Arc::new(payload(15 * 1024 * 1024));
+    let server = TestServer::start(
+        data.clone(),
+        ServerOptions {
+            truncate_at: None,
+            truncate_first: 0,
+            no_range: false,
+            pace: Some(Duration::from_millis(4)),
+            // Stall the first chunk (range starts at 0) so its siblings
+            // finish while it is still ~untouched; idle workers then split it.
+            stall: Some((0, Duration::from_millis(800))),
+            requests: Arc::new(Mutex::new(0)),
+        },
+    )
+    .await;
+    let dir = test_dir("splitorder");
+    let out = dir.join("file.bin");
+    let data_dir = dir.join("data");
+
+    let outcome = run_engine(server.url("/file.bin"), out.clone(), data_dir.clone(), |o| {
+        o.connections = 3;
+    })
+    .await
+    .unwrap();
+    assert_eq!(outcome.state, rdm::models::DownloadState::Completed);
+
+    let got = std::fs::read(&out).unwrap();
+    assert_eq!(got.len(), data.len());
+    assert_eq!(got, *data, "split download must match byte-for-byte");
+
+    // Sanity: a dynamic split really happened (3 planned + >=1 child row).
+    let storage = rdm::storage::database::Storage::open(&data_dir.join("metadata.db")).unwrap();
+    let dl = storage
+        .find_download_by_url_output(&server.url("/file.bin"), &out)
+        .unwrap()
+        .unwrap();
+    let rows = storage.get_chunks(dl.id).unwrap();
+    assert!(
+        rows.len() >= 4,
+        "expected a dynamic split to have happened, found {} chunk rows",
+        rows.len()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

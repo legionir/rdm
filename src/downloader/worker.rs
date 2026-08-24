@@ -15,7 +15,7 @@ use futures_util::StreamExt;
 use reqwest::header::RANGE;
 use reqwest::StatusCode;
 use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -409,6 +409,14 @@ async fn open_chunk_file(path: &PathBuf, offset: u64) -> Result<tokio::fs::File>
         debug!("chunk file length {len} != offset {offset}; truncating file");
         file.set_len(offset).await?;
     }
+    // The file cursor starts at 0: a resumed transfer must append at `offset`.
+    // Without this seek the first write of a resumed chunk overwrites the
+    // file from position 0 (new tail bytes land at the head, the middle keeps
+    // stale data and set_len pads the end with zeros) — the assembled file
+    // then has the right size but fails checksum verification.
+    file.seek(SeekFrom::Start(offset))
+        .await
+        .context("cannot seek chunk file to resume offset")?;
     Ok(file)
 }
 

@@ -28,41 +28,46 @@ pub enum UiAction {
     CancelPending(u64),
     ClearQueue,
     OpenOutputFolder(i64),
+    /// Double-click on a row: open the details modal for this download.
+    OpenDetails(i64),
     SaveSettings,
     ReloadSettings,
     ApplyDataDir,
     ClearLog,
 }
 
-/// Which detail tab is open for the selected row.
+/// Which tab of the details modal is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetailTab {
     Overview,
     Chunks,
-    Events,
     Json,
-    Queue,
-    Log,
 }
 
 impl DetailTab {
-    pub const ALL: [DetailTab; 6] = [
-        DetailTab::Overview,
-        DetailTab::Chunks,
-        DetailTab::Events,
-        DetailTab::Json,
-        DetailTab::Queue,
-        DetailTab::Log,
-    ];
+    pub const ALL: [DetailTab; 3] = [DetailTab::Overview, DetailTab::Chunks, DetailTab::Json];
 
     pub fn title(&self) -> &'static str {
         match self {
             DetailTab::Overview => "Overview",
             DetailTab::Chunks => "Chunks",
-            DetailTab::Events => "Events",
             DetailTab::Json => "JSON",
-            DetailTab::Queue => "Queue",
-            DetailTab::Log => "App log",
+        }
+    }
+}
+
+/// Which box the footer status bar has expanded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FooterPanel {
+    Events,
+    AppLog,
+}
+
+impl FooterPanel {
+    pub fn title(&self) -> &'static str {
+        match self {
+            FooterPanel::Events => "Events",
+            FooterPanel::AppLog => "App log",
         }
     }
 }
@@ -122,7 +127,15 @@ pub struct GuiState {
     pub show_add: bool,
     pub form: StartRequest,
     pub form_error: Option<String>,
+    /// The download whose details modal is open (double-click on a row).
+    pub detail_id: Option<i64>,
     pub detail_tab: DetailTab,
+    /// Which box the footer bar has expanded (`None` = collapsed).
+    pub footer_panel: Option<FooterPanel>,
+    /// Whether the settings sidebar is visible (toggled from the top menu).
+    pub show_settings: bool,
+    /// Whether the queue sidebar is visible (toggled from the top menu).
+    pub show_queue: bool,
     pub chunks: Vec<ChunkRecord>,
     pub events: Vec<(String, String, i64)>,
     pub json: String,
@@ -150,7 +163,11 @@ impl GuiState {
             show_add: false,
             form,
             form_error: None,
+            detail_id: None,
             detail_tab: DetailTab::Overview,
+            footer_panel: None,
+            show_settings: false,
+            show_queue: false,
             chunks: Vec::new(),
             events: Vec::new(),
             json: String::new(),
@@ -229,6 +246,11 @@ impl GuiState {
 
     pub fn selected_record(&self) -> Option<&DownloadRecord> {
         let id = self.selected?;
+        self.downloads.iter().find(|r| r.id == id)
+    }
+
+    /// Look up a download row by database id (used by the details modal).
+    pub fn record(&self, id: i64) -> Option<&DownloadRecord> {
         self.downloads.iter().find(|r| r.id == id)
     }
 

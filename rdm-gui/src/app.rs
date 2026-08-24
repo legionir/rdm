@@ -1,5 +1,9 @@
 //! Application root: polls the metadata database, renders the panels and
 //! turns [`UiAction`]s into `rdm` library calls.
+//!
+//! Layout (top to bottom): toolbar → optional Queue/Settings sidebars →
+//! download list → optional Events/App-log box → status bar. Details live in
+//! a modal opened by double-clicking a row.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -11,7 +15,7 @@ use rdm::models::DownloadState;
 use crate::backend::{Backend, BackendEvent};
 use crate::logging::LogControl;
 use crate::settings::SettingsStore;
-use crate::state::{DetailTab, GuiState, UiAction};
+use crate::state::{DetailTab, FooterPanel, GuiState, UiAction};
 use crate::util;
 
 pub struct RdmGuiApp {
@@ -20,7 +24,9 @@ pub struct RdmGuiApp {
     state: GuiState,
     last_poll: Instant,
     last_selected: Option<i64>,
-    theme_applied: bool,
+    last_detail: Option<i64>,
+    last_footer: Option<FooterPanel>,
+    applied_dark: Option<bool>,
     logging: Option<LogControl>,
     log_level: String,
     shutting_down: bool,
@@ -46,7 +52,9 @@ impl RdmGuiApp {
             state,
             last_poll: Instant::now(),
             last_selected: None,
-            theme_applied: false,
+            last_detail: None,
+            last_footer: None,
+            applied_dark: None,
             logging,
             log_level: String::new(),
             shutting_down: false,
@@ -84,17 +92,17 @@ impl RdmGuiApp {
         }
         let selection_changed = self.last_selected != self.state.selected;
         self.last_selected = self.state.selected;
-        if let Some(id) = self.state.selected {
+        let detail_changed = self.last_detail != self.state.detail_id;
+        self.last_detail = self.state.detail_id;
+
+        // Details modal: only the tab that is visible needs fresh data.
+        if let Some(id) = self.state.detail_id {
             let wants_chunks = matches!(self.state.detail_tab, DetailTab::Chunks);
-            let wants_events = matches!(self.state.detail_tab, DetailTab::Events);
             let wants_json = matches!(self.state.detail_tab, DetailTab::Json);
-            if wants_chunks || selection_changed {
+            if wants_chunks || detail_changed {
                 self.state.chunks = self.backend.chunks(id).unwrap_or_default();
             }
-            if wants_events || selection_changed {
-                self.state.events = self.backend.events(id, 50).unwrap_or_default();
-            }
-            if wants_json || selection_changed {
+            if wants_json || detail_changed {
                 self.state.json = match self.backend.snapshot_json(id) {
                     Ok(json) => json,
                     Err(err) => format!("// {err:#}"),
@@ -102,8 +110,16 @@ impl RdmGuiApp {
             }
         } else {
             self.state.chunks.clear();
-            self.state.events.clear();
             self.state.json.clear();
+        }
+
+        // Footer Events box shows the selected download's events.
+        if self.state.footer_panel == Some(FooterPanel::Events) {
+            if let Some(id) = self.state.selected {
+                self.state.events = self.backend.events(id, 50).unwrap_or_default();
+            } else {
+                self.state.events.clear();
+            }
         }
     }
 
@@ -126,7 +142,7 @@ impl RdmGuiApp {
         }
     }
 
-    /// Move captured `tracing` output into the App log tab.
+    /// Move captured `tracing` output into the App log box.
     fn drain_engine_logs(&mut self) {
         let Some(control) = self.logging.clone() else {
             return;
@@ -244,6 +260,11 @@ impl RdmGuiApp {
                 self.state.selected = Some(id);
                 self.refresh(true);
             }
+            UiAction::OpenDetails(id) => {
+                self.state.selected = Some(id);
+                self.state.detail_id = Some(id);
+                self.refresh(true);
+            }
             UiAction::Refresh => self.refresh(true),
             UiAction::CopyToClipboard(text) => {
                 ctx.output_mut(|o| o.copied_text = text);
@@ -295,6 +316,7 @@ impl RdmGuiApp {
                         self.state
                             .push_log("info", format!("using metadata in {}", dir.display()));
                         self.state.selected = None;
+                        self.state.detail_id = None;
                         self.refresh(true);
                     }
                     Err(err) => self.state.push_log("error", format!("{err:#}")),
@@ -342,11 +364,12 @@ impl RdmGuiApp {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(format!("Remove {label} from the database?"));
+                ui.add_space(6.0);
                 ui.checkbox(&mut purge, "also delete the downloaded file");
-                ui.add_space(8.0);
+                ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     if ui
-                        .button(RichText::new("Remove").color(Color32::from_rgb(239, 68, 68)))
+                        .button(RichText::new("Remove").color(Color32::from_rgb(220, 38, 38)))
                         .clicked()
                     {
                         actions.push(UiAction::Remove { id, purge });
@@ -368,16 +391,16 @@ impl RdmGuiApp {
 
 impl eframe::App for RdmGuiApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        if !self.theme_applied {
-            self.theme_applied = true;
-            apply_theme(ctx, self.settings.settings().dark_mode);
-        }
-
         if self.settings.poll_external_change() {
             self.state.settings_dirty = false;
-            apply_theme(ctx, self.settings.settings().dark_mode);
             self.state
                 .push_log("info", "settings.toml changed on disk — reloaded");
+        }
+        // Theme + global paddings, applied live whenever the toggle changes.
+        let dark = self.settings.settings().dark_mode;
+        if self.applied_dark != Some(dark) {
+            apply_theme(ctx, dark);
+            self.applied_dark = Some(dark);
         }
 
         let limit = self.max_concurrent();
@@ -396,28 +419,18 @@ impl eframe::App for RdmGuiApp {
         }
         self.refresh(false);
 
+        // Opening the Events box should fill immediately, not on the next tick.
+        if self.last_footer != self.state.footer_panel {
+            self.last_footer = self.state.footer_panel;
+            self.refresh(true);
+        }
+
         let mut actions: Vec<UiAction> = Vec::new();
         let active_jobs = self.backend.active_jobs();
         let queued = self.state.queue.len();
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.heading("rdm");
-                ui.label(
-                    RichText::new("Rust Download Manager")
-                        .small()
-                        .color(Color32::from_gray(140)),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(self.backend.db_path().display().to_string())
-                            .small()
-                            .color(Color32::from_gray(120)),
-                    );
-                });
-            });
-            ui.add_space(2.0);
+            ui.add_space(6.0);
             actions.extend(crate::views::toolbar::show(
                 ui,
                 &mut self.state,
@@ -427,60 +440,56 @@ impl eframe::App for RdmGuiApp {
             ui.add_space(4.0);
         });
 
-        egui::SidePanel::right("settings-panel")
-            .resizable(true)
-            .default_width(280.0)
+        egui::TopBottomPanel::bottom("status-bar")
+            .resizable(false)
             .show(ctx, |ui| {
-                ui.add_space(4.0);
-                ui.heading("⚙ Settings");
-                ui.separator();
-                let path = self.settings.path().display().to_string();
-                actions.extend(crate::views::settings_view::show(
-                    ui,
-                    self.settings.settings_mut(),
-                    &path,
-                    &mut self.state,
-                ));
+                crate::views::footer::status_bar(ui, &mut self.state);
             });
 
-        egui::TopBottomPanel::bottom("status-bar").show(ctx, |ui| {
-            ui.add_space(2.0);
-            ui.horizontal(|ui| {
-                let color = if self.state.status_is_error {
-                    Color32::from_rgb(239, 68, 68)
-                } else {
-                    Color32::from_gray(170)
-                };
-                ui.label(RichText::new(&self.state.status).small().color(color));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (done, waiting, running, failed, cancelled) = self.state.counts();
-                    ui.label(
-                        RichText::new(format!(
-                            "{} record(s) · {done} done · {running} running · {waiting} waiting · {failed} failed · {cancelled} cancelled",
-                            self.state.downloads.len()
-                        ))
-                        .small()
-                        .color(Color32::from_gray(140)),
-                    );
+        if self.state.footer_panel.is_some() {
+            egui::TopBottomPanel::bottom("footer-panel")
+                .resizable(true)
+                .default_height(220.0)
+                .min_height(90.0)
+                .show(ctx, |ui| {
+                    actions.extend(crate::views::footer::panel(ui, &mut self.state));
                 });
-            });
-            ui.add_space(2.0);
-        });
+        }
 
-        egui::TopBottomPanel::bottom("details-panel")
-            .resizable(true)
-            .default_height(260.0)
-            .min_height(120.0)
-            .show(ctx, |ui| {
-                ui.add_space(4.0);
-                actions.extend(crate::views::details::show(ui, &mut self.state));
-            });
+        if self.state.show_queue {
+            egui::SidePanel::left("queue-sidebar")
+                .resizable(true)
+                .default_width(340.0)
+                .min_width(240.0)
+                .show(ctx, |ui| {
+                    actions.extend(crate::views::queue_sidebar::show(ui, &mut self.state));
+                });
+        }
+
+        if self.state.show_settings {
+            let settings_path = self.settings.path().display().to_string();
+            let db_path = self.backend.db_path().display().to_string();
+            egui::SidePanel::right("settings-sidebar")
+                .resizable(true)
+                .default_width(340.0)
+                .min_width(260.0)
+                .show(ctx, |ui| {
+                    actions.extend(crate::views::settings_view::show(
+                        ui,
+                        self.settings.settings_mut(),
+                        &settings_path,
+                        &db_path,
+                        &mut self.state,
+                    ));
+                });
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             actions.extend(crate::views::download_list::show(ui, &mut self.state));
         });
 
         actions.extend(crate::views::add_download::show(ctx, &mut self.state));
+        actions.extend(crate::views::details_modal::show(ctx, &mut self.state));
         actions.extend(self.confirm_dialog(ctx));
 
         for action in actions {
@@ -505,7 +514,11 @@ impl eframe::App for RdmGuiApp {
                 .iter()
                 .any(|r| r.state.active() || r.state == DownloadState::Merging);
         let refresh = self.settings.settings().refresh_ms.max(100);
-        ctx.request_repaint_after(Duration::from_millis(if busy { refresh.min(500) } else { refresh }));
+        ctx.request_repaint_after(Duration::from_millis(if busy {
+            refresh.min(500)
+        } else {
+            refresh
+        }));
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -516,7 +529,14 @@ impl eframe::App for RdmGuiApp {
     }
 }
 
+/// Set the palette plus the global paddings: roomier buttons/inputs and more
+/// vertical breathing room between widgets.
 fn apply_theme(ctx: &Context, dark: bool) {
+    let mut style = (*ctx.style()).clone();
+    style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+    style.spacing.button_padding = egui::vec2(12.0, 6.0);
+    style.spacing.interact_size = egui::vec2(40.0, 22.0);
+    ctx.set_style(style);
     ctx.set_visuals(if dark {
         egui::Visuals::dark()
     } else {
