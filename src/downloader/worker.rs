@@ -398,7 +398,7 @@ async fn open_chunk_file(path: &PathBuf, offset: u64) -> Result<tokio::fs::File>
             .await
             .context("cannot create chunk directory")?;
     }
-    let file = OpenOptions::new()
+    let mut file = OpenOptions::new()
         .create(true)
         .write(true)
         .read(true)
