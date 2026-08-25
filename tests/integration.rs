@@ -15,6 +15,7 @@ fn payload(size: usize) -> Vec<u8> {
     (0..size).map(|i| (i % 251) as u8).collect()
 }
 
+#[derive(Clone)]
 struct ServerOptions {
     /// For the first `truncate_first` requests, close after this many bytes.
     truncate_at: Option<usize>,
@@ -25,11 +26,27 @@ struct ServerOptions {
     /// Sleep this long between 64 KiB body writes (throttles transfers so
     /// tests can pause them mid-stream).
     pace: Option<Duration>,
-    /// `(range_start, delay)`: stall any ranged request that starts exactly at
-    /// `range_start` before responding (deterministic dynamic-split setup).
+    /// `(range_start, timeout)`: hold headers for a non-probe request whose
+    /// range starts at `range_start` until two other ranged bodies finish
+    /// (or `timeout` elapses). The stalled chunk stays at 0 bytes so an idle
+    /// worker can split it — a fixed sleep is not enough on loaded Windows CI.
     stall: Option<(u64, Duration)>,
     /// Number of requests handled so far.
     requests: Arc<Mutex<usize>>,
+    /// Finished `206` responses (used by `stall`).
+    ranged_done: Arc<Mutex<usize>>,
+}
+
+fn server_opts() -> ServerOptions {
+    ServerOptions {
+        truncate_at: None,
+        truncate_first: 0,
+        no_range: false,
+        pace: None,
+        stall: None,
+        requests: Arc::new(Mutex::new(0)),
+        ranged_done: Arc::new(Mutex::new(0)),
+    }
 }
 
 struct TestServer {
@@ -47,14 +64,7 @@ impl TestServer {
             loop {
                 let Ok((mut sock, _)) = listener.accept().await else { break };
                 let data = data.clone();
-                let opts = ServerOptions {
-                    truncate_at: opts.truncate_at,
-                    truncate_first: opts.truncate_first,
-                    no_range: opts.no_range,
-                    pace: opts.pace,
-                    stall: opts.stall,
-                    requests: opts.requests.clone(),
-                };
+                let opts = opts.clone();
                 tokio::spawn(async move {
                     if let Err(e) = serve(&mut sock, &data, &opts).await {
                         let _ = e;
@@ -91,7 +101,7 @@ async fn serve(sock: &mut TcpStream, data: &[u8], opts: &ServerOptions) -> std::
     let text = String::from_utf8_lossy(&buf);
     let mut lines = text.lines();
     let request_line = lines.next().unwrap_or("").to_string();
-    let _method = request_line.split_whitespace().next().unwrap_or("").to_string();
+    let method = request_line.split_whitespace().next().unwrap_or("").to_string();
     let mut range: Option<(u64, u64)> = None;
     for line in lines {
         let lower = line.to_ascii_lowercase();
@@ -108,10 +118,25 @@ async fn serve(sock: &mut TcpStream, data: &[u8], opts: &ServerOptions) -> std::
         }
     }
     *opts.requests.lock().unwrap() += 1;
-    if let Some((stall_start, delay)) = opts.stall {
-        if let Some((s, _)) = range {
-            if s == stall_start {
-                tokio::time::sleep(delay).await;
+    // Hold a large first-chunk request until sibling ranges have finished so
+    // the engine sees idle workers + an untouched active chunk. Skip 1-byte
+    // probes (`bytes=0-0`) or the workers never start (deadlock).
+    if let Some((stall_start, timeout)) = opts.stall {
+        if let Some((s, e)) = range {
+            if s == stall_start && e > s {
+                let deadline = tokio::time::Instant::now() + timeout;
+                loop {
+                    if *opts.ranged_done.lock().unwrap() >= 2 {
+                        break;
+                    }
+                    if tokio::time::Instant::now() >= deadline {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                // Let the engine process sibling Completions and split while
+                // this request is still unanswered (downloaded stays 0).
+                tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
     }
@@ -162,6 +187,9 @@ async fn serve(sock: &mut TcpStream, data: &[u8], opts: &ServerOptions) -> std::
         if status.starts_with("206") { data.len() } else { data.len() }
     );
     sock.write_all(resp_head.as_bytes()).await?;
+    if method.eq_ignore_ascii_case("HEAD") {
+        return Ok(());
+    }
 
     let slice = if status.starts_with("206") {
         &data[start as usize..=end as usize]
@@ -174,6 +202,7 @@ async fn serve(sock: &mut TcpStream, data: &[u8], opts: &ServerOptions) -> std::
             let n = max.min(slice.len());
             sock.write_all(&slice[..n]).await?;
             // Close abruptly WITHOUT Content-Length satisfaction.
+            mark_ranged_done(opts, status);
             return Ok(());
         }
     }
@@ -186,7 +215,14 @@ async fn serve(sock: &mut TcpStream, data: &[u8], opts: &ServerOptions) -> std::
             tokio::time::sleep(pace).await;
         }
     }
+    mark_ranged_done(opts, status);
     Ok(())
+}
+
+fn mark_ranged_done(opts: &ServerOptions, status: &str) {
+    if status.starts_with("206") {
+        *opts.ranged_done.lock().unwrap() += 1;
+    }
 }
 
 /// Unique temp directory for one test.
@@ -239,14 +275,7 @@ async fn segmented_download_matches_payload() {
     let data = Arc::new(payload(8 * 1024 * 1024 + 12345)); // not a multiple of chunks
     let server = TestServer::start(
         data.clone(),
-        ServerOptions {
-            truncate_at: None,
-            truncate_first: 0,
-            no_range: false,
-            pace: None,
-            stall: None,
-            requests: Arc::new(Mutex::new(0)),
-        },
+        server_opts(),
     )
     .await;
     let dir = test_dir("seg");
@@ -278,10 +307,7 @@ async fn resume_after_premature_disconnect() {
         ServerOptions {
             truncate_at: Some(64 * 1024),
             truncate_first: 2,
-            no_range: false,
-            pace: None,
-            stall: None,
-            requests: Arc::new(Mutex::new(0)),
+            ..server_opts()
         },
     )
     .await;
@@ -322,10 +348,7 @@ async fn pause_preserves_chunks_and_resume_continues() {
         ServerOptions {
             truncate_at: Some(64 * 1024),
             truncate_first: 2,
-            no_range: false,
-            pace: None,
-            stall: None,
-            requests: Arc::new(Mutex::new(0)),
+            ..server_opts()
         },
     )
     .await;
@@ -369,12 +392,8 @@ async fn single_stream_fallback_when_server_has_no_ranges() {
     let server = TestServer::start(
         data.clone(),
         ServerOptions {
-            truncate_at: None,
-            truncate_first: 0,
             no_range: true,
-            pace: None,
-            stall: None,
-            requests: Arc::new(Mutex::new(0)),
+            ..server_opts()
         },
     )
     .await;
@@ -393,14 +412,7 @@ async fn checksum_verification() {
     let data = Arc::new(payload(1024 * 1024));
     let server = TestServer::start(
         data.clone(),
-        ServerOptions {
-            truncate_at: None,
-            truncate_first: 0,
-            no_range: false,
-            pace: None,
-            stall: None,
-            requests: Arc::new(Mutex::new(0)),
-        },
+        server_opts(),
     )
     .await;
     let dir = test_dir("checksum");
@@ -434,14 +446,7 @@ async fn zero_byte_file() {
     let data = Arc::new(Vec::new());
     let server = TestServer::start(
         data,
-        ServerOptions {
-            truncate_at: None,
-            truncate_first: 0,
-            no_range: false,
-            pace: None,
-            stall: None,
-            requests: Arc::new(Mutex::new(0)),
-        },
+        server_opts(),
     )
     .await;
     // The probe path returns 416 for a ranged GET of an empty resource; the
@@ -562,20 +567,16 @@ async fn pause_resume_mid_transfer_preserves_content() {
 /// Regression test for merge order after a dynamic split: split children sit
 /// at the END of the chunk table while their byte range is mid-file, so the
 /// final assembly must order chunks by range, not by table position.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn split_chunks_merge_in_byte_order() {
     let data = Arc::new(payload(15 * 1024 * 1024));
     let server = TestServer::start(
         data.clone(),
         ServerOptions {
-            truncate_at: None,
-            truncate_first: 0,
-            no_range: false,
-            pace: Some(Duration::from_millis(4)),
-            // Stall the first chunk (range starts at 0) so its siblings
-            // finish while it is still ~untouched; idle workers then split it.
-            stall: Some((0, Duration::from_millis(800))),
-            requests: Arc::new(Mutex::new(0)),
+            // Hold the first-chunk headers until the other two ranges finish
+            // (see `stall`); no pace — siblings should complete ASAP.
+            stall: Some((0, Duration::from_secs(15))),
+            ..server_opts()
         },
     )
     .await;
@@ -585,6 +586,8 @@ async fn split_chunks_merge_in_byte_order() {
 
     let outcome = run_engine(server.url("/file.bin"), out.clone(), data_dir.clone(), |o| {
         o.connections = 3;
+        // Wider split window than the default 4 MiB remainder threshold.
+        o.chunk_size = 256 * 1024;
     })
     .await
     .unwrap();
