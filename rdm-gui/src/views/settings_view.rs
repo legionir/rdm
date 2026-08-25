@@ -19,6 +19,11 @@ pub fn show(
     let mut actions = Vec::new();
     let before = settings.clone();
 
+    // Children must not report a bigger size than the panel — TextEdit with
+    // infinite desired width and long path labels would otherwise stretch a
+    // resizable SidePanel across the whole window (and again on every resize).
+    ui.set_max_width(ui.available_width());
+
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.heading("Settings");
@@ -77,7 +82,7 @@ pub fn show(
                 egui::TextEdit::singleline(&mut settings.chunk_size)
                     .hint_text("1MiB")
                     .margin(EDIT_MARGIN)
-                    .desired_width(f32::INFINITY),
+                    .desired_width(ui.available_width()),
             );
 
             ui.add_space(4.0);
@@ -86,7 +91,7 @@ pub fn show(
                 egui::TextEdit::singleline(&mut settings.max_speed)
                     .hint_text("unlimited, e.g. 5MB/s")
                     .margin(EDIT_MARGIN)
-                    .desired_width(f32::INFINITY),
+                    .desired_width(ui.available_width()),
             );
 
             ui.add_space(4.0);
@@ -99,7 +104,7 @@ pub fn show(
                 egui::TextEdit::singleline(&mut settings.user_agent)
                     .hint_text("rdm/0.1.0")
                     .margin(EDIT_MARGIN)
-                    .desired_width(f32::INFINITY),
+                    .desired_width(ui.available_width()),
             );
 
             ui.add_space(12.0);

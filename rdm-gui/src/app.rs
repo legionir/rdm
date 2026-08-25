@@ -456,11 +456,14 @@ impl eframe::App for RdmGuiApp {
                 });
         }
 
+        let sidebar_max = sidebar_max_width(ctx.available_rect().width());
+
         if self.state.show_queue {
             egui::SidePanel::left("queue-sidebar")
                 .resizable(true)
                 .default_width(340.0)
                 .min_width(240.0)
+                .max_width(sidebar_max)
                 .show(ctx, |ui| {
                     actions.extend(crate::views::queue_sidebar::show(ui, &mut self.state));
                 });
@@ -473,6 +476,7 @@ impl eframe::App for RdmGuiApp {
                 .resizable(true)
                 .default_width(340.0)
                 .min_width(260.0)
+                .max_width(sidebar_max)
                 .show(ctx, |ui| {
                     actions.extend(crate::views::settings_view::show(
                         ui,
@@ -529,6 +533,11 @@ impl eframe::App for RdmGuiApp {
     }
 }
 
+/// Cap sidebars so a long path / infinite-width widget cannot eat the list.
+fn sidebar_max_width(window_width: f32) -> f32 {
+    (window_width * 0.4).clamp(260.0, 400.0)
+}
+
 /// Set the palette plus the global paddings: roomier buttons/inputs and more
 /// vertical breathing room between widgets.
 fn apply_theme(ctx: &Context, dark: bool) {
@@ -542,4 +551,17 @@ fn apply_theme(ctx: &Context, dark: bool) {
     } else {
         egui::Visuals::light()
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sidebar_max_width;
+
+    #[test]
+    fn sidebar_never_eats_the_window() {
+        assert_eq!(sidebar_max_width(2000.0), 400.0);
+        assert_eq!(sidebar_max_width(1000.0), 400.0);
+        assert_eq!(sidebar_max_width(800.0), 320.0);
+        assert_eq!(sidebar_max_width(400.0), 260.0);
+    }
 }
