@@ -26,15 +26,12 @@ struct ServerOptions {
     /// Sleep this long between 64 KiB body writes (throttles transfers so
     /// tests can pause them mid-stream).
     pace: Option<Duration>,
-    /// `(range_start, timeout)`: hold headers for a non-probe request whose
-    /// range starts at `range_start` until two other ranged bodies finish
-    /// (or `timeout` elapses). The stalled chunk stays at 0 bytes so an idle
-    /// worker can split it — a fixed sleep is not enough on loaded Windows CI.
+    /// `(range_start, delay)`: hold headers for a non-probe request whose
+    /// range starts at `range_start`. The stalled chunk stays at 0 bytes so
+    /// idle workers can split it. Do not stall `bytes=0-0` probes.
     stall: Option<(u64, Duration)>,
     /// Number of requests handled so far.
     requests: Arc<Mutex<usize>>,
-    /// Finished `206` responses (used by `stall`).
-    ranged_done: Arc<Mutex<usize>>,
 }
 
 fn server_opts() -> ServerOptions {
@@ -45,7 +42,6 @@ fn server_opts() -> ServerOptions {
         pace: None,
         stall: None,
         requests: Arc::new(Mutex::new(0)),
-        ranged_done: Arc::new(Mutex::new(0)),
     }
 }
 
@@ -118,25 +114,13 @@ async fn serve(sock: &mut TcpStream, data: &[u8], opts: &ServerOptions) -> std::
         }
     }
     *opts.requests.lock().unwrap() += 1;
-    // Hold a large first-chunk request until sibling ranges have finished so
-    // the engine sees idle workers + an untouched active chunk. Skip 1-byte
-    // probes (`bytes=0-0`) or the workers never start (deadlock).
-    if let Some((stall_start, timeout)) = opts.stall {
+    // Hold a large first-chunk request so siblings can finish and idle
+    // workers split it. Skip 1-byte probes (`bytes=0-0`) or the workers
+    // never start.
+    if let Some((stall_start, delay)) = opts.stall {
         if let Some((s, e)) = range {
             if s == stall_start && e > s {
-                let deadline = tokio::time::Instant::now() + timeout;
-                loop {
-                    if *opts.ranged_done.lock().unwrap() >= 2 {
-                        break;
-                    }
-                    if tokio::time::Instant::now() >= deadline {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                // Let the engine process sibling Completions and split while
-                // this request is still unanswered (downloaded stays 0).
-                tokio::time::sleep(Duration::from_millis(250)).await;
+                tokio::time::sleep(delay).await;
             }
         }
     }
@@ -202,7 +186,6 @@ async fn serve(sock: &mut TcpStream, data: &[u8], opts: &ServerOptions) -> std::
             let n = max.min(slice.len());
             sock.write_all(&slice[..n]).await?;
             // Close abruptly WITHOUT Content-Length satisfaction.
-            mark_ranged_done(opts, status);
             return Ok(());
         }
     }
@@ -215,14 +198,7 @@ async fn serve(sock: &mut TcpStream, data: &[u8], opts: &ServerOptions) -> std::
             tokio::time::sleep(pace).await;
         }
     }
-    mark_ranged_done(opts, status);
     Ok(())
-}
-
-fn mark_ranged_done(opts: &ServerOptions, status: &str) {
-    if status.starts_with("206") {
-        *opts.ranged_done.lock().unwrap() += 1;
-    }
 }
 
 /// Unique temp directory for one test.
@@ -567,15 +543,16 @@ async fn pause_resume_mid_transfer_preserves_content() {
 /// Regression test for merge order after a dynamic split: split children sit
 /// at the END of the chunk table while their byte range is mid-file, so the
 /// final assembly must order chunks by range, not by table position.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::test]
 async fn split_chunks_merge_in_byte_order() {
     let data = Arc::new(payload(15 * 1024 * 1024));
     let server = TestServer::start(
         data.clone(),
         ServerOptions {
-            // Hold the first-chunk headers until the other two ranges finish
-            // (see `stall`); no pace — siblings should complete ASAP.
-            stall: Some((0, Duration::from_secs(15))),
+            // No pace: siblings finish in milliseconds on loopback. Hold the
+            // first chunk long enough that even a loaded Windows runner has
+            // idle workers while it is still at 0 bytes.
+            stall: Some((0, Duration::from_secs(3))),
             ..server_opts()
         },
     )
@@ -584,12 +561,15 @@ async fn split_chunks_merge_in_byte_order() {
     let out = dir.join("file.bin");
     let data_dir = dir.join("data");
 
-    let outcome = run_engine(server.url("/file.bin"), out.clone(), data_dir.clone(), |o| {
-        o.connections = 3;
-        // Wider split window than the default 4 MiB remainder threshold.
-        o.chunk_size = 256 * 1024;
-    })
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(30),
+        run_engine(server.url("/file.bin"), out.clone(), data_dir.clone(), |o| {
+            o.connections = 3;
+            o.chunk_size = 256 * 1024;
+        }),
+    )
     .await
+    .expect("split test timed out")
     .unwrap();
     assert_eq!(outcome.state, rdm::models::DownloadState::Completed);
 
