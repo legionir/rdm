@@ -2,7 +2,6 @@
 //! engine (segmented download, resume after premature disconnect, single
 //! stream fallback, checksum verification).
 
-use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -52,6 +51,8 @@ impl TestServer {
                     truncate_at: opts.truncate_at,
                     truncate_first: opts.truncate_first,
                     no_range: opts.no_range,
+                    pace: opts.pace,
+                    stall: opts.stall,
                     requests: opts.requests.clone(),
                 };
                 tokio::spawn(async move {
@@ -90,7 +91,7 @@ async fn serve(sock: &mut TcpStream, data: &[u8], opts: &ServerOptions) -> std::
     let text = String::from_utf8_lossy(&buf);
     let mut lines = text.lines();
     let request_line = lines.next().unwrap_or("").to_string();
-    let method = request_line.split_whitespace().next().unwrap_or("").to_string();
+    let _method = request_line.split_whitespace().next().unwrap_or("").to_string();
     let mut range: Option<(u64, u64)> = None;
     for line in lines {
         let lower = line.to_ascii_lowercase();
@@ -127,7 +128,7 @@ async fn serve(sock: &mut TcpStream, data: &[u8], opts: &ServerOptions) -> std::
         }
     } else {
         match (range, opts.no_range) {
-            (Some((s, e)), false) if s >= data.len() as u64 => {
+            (Some((s, _e)), false) if s >= data.len() as u64 => {
             let body = format!(
                 "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 data.len()
@@ -520,6 +521,7 @@ async fn pause_resume_mid_transfer_preserves_content() {
     let outcome1 = tokio::time::timeout(Duration::from_secs(60), first)
         .await
         .expect("paused run timed out")
+        .expect("first run join failed")
         .expect("first run failed");
     assert_eq!(outcome1.state, rdm::models::DownloadState::Paused);
 

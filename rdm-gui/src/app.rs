@@ -90,7 +90,7 @@ impl RdmGuiApp {
                 .state
                 .push_log("error", format!("cannot read downloads: {err:#}")),
         }
-        let selection_changed = self.last_selected != self.state.selected;
+        let _selection_changed = self.last_selected != self.state.selected;
         self.last_selected = self.state.selected;
         let detail_changed = self.last_detail != self.state.detail_id;
         self.last_detail = self.state.detail_id;
