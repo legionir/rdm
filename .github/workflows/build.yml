@@ -1,4 +1,4 @@
-name: Build rdm (CLI + GUI)
+name: Build rdm (Windows tests + GUI)
 
 on:
   push:
@@ -17,74 +17,6 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  build-cli-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Configure vendored sources
-        run: |
-          mkdir -p .cargo
-          cp vendor-config.txt .cargo/config.toml
-      - name: Build CLI binary
-        run: cargo build --release --locked
-      - name: Stage CLI binary
-        run: |
-          mkdir -p dist
-          cp target/release/rdm dist/rdm-linux-x86_64
-          chmod +x dist/rdm-linux-x86_64
-      - name: Upload CLI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rdm-linux-x86_64
-          path: dist/rdm-linux-x86_64
-          if-no-files-found: error
-
-  build-cli-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Disable vendored crates.io (Windows line endings break vendor checksums)
-        shell: bash
-        run: rm -f .cargo/config.toml .cargo/config
-      - name: Build CLI binary
-        run: cargo build --release
-      - name: Stage CLI binary
-        shell: bash
-        run: |
-          mkdir -p dist
-          cp target/release/rdm.exe dist/rdm-windows-x86_64.exe
-      - name: Upload CLI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rdm-windows-x86_64.exe
-          path: dist/rdm-windows-x86_64.exe
-          if-no-files-found: error
-
-  test-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Configure vendored sources
-        run: |
-          mkdir -p .cargo
-          cp vendor-config.txt .cargo/config.toml
-      - name: Unit + integration tests
-        run: cargo test --locked --all-targets
-      - name: Surface test failures
-        if: failure()
-        shell: bash
-        run: |
-          out=$(cargo test --locked --all-targets --no-fail-fast 2>&1 \
-            | grep -E "^(error|test .* FAILED|failures:|thread .* panicked|assertion)" | tail -50)
-          printf '::error title=cargo test::%s\n' \
-            "$(printf '%s' "$out" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
-
   test-windows:
     runs-on: windows-latest
     steps:
@@ -96,52 +28,6 @@ jobs:
         run: rm -f .cargo/config.toml .cargo/config
       - name: Unit + integration tests
         run: cargo test --all-targets
-
-  build-gui-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install native GUI libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config libgtk-3-dev libx11-dev libxcb-render0-dev \
-            libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev \
-            libgl1-mesa-dev
-      - name: Disable vendored crates.io (egui is not in vendor/)
-        run: rm -f .cargo/config.toml .cargo/config
-      - name: Build GUI binary
-        working-directory: rdm-gui
-        run: cargo build --release
-      - name: Surface compiler errors
-        if: failure()
-        working-directory: rdm-gui
-        shell: bash
-        run: |
-          # Actions logs are not always downloadable, so a failed build echoes
-          # its diagnostics back as a single workflow annotation, which is
-          # readable through the REST API. Dependencies are already compiled,
-          # so re-running the build costs seconds.
-          out=$(cargo build --release --message-format=short 2>&1 | grep -E 'error(\[|:)' | tail -50)
-          printf '::error title=rustc::%s\n' \
-            "$(printf '%s' "$out" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
-      - name: Test GUI crate
-        working-directory: rdm-gui
-        shell: bash
-        run: cargo test --release
-      - name: Stage GUI binary
-        run: |
-          mkdir -p dist
-          cp rdm-gui/target/release/rdm-gui dist/rdm-gui-linux-x86_64
-          chmod +x dist/rdm-gui-linux-x86_64
-      - name: Upload GUI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rdm-gui-linux-x86_64
-          path: dist/rdm-gui-linux-x86_64
-          if-no-files-found: error
 
   build-gui-windows:
     runs-on: windows-latest
@@ -182,55 +68,3 @@ jobs:
           name: rdm-gui-windows-x86_64.exe
           path: dist/rdm-gui-windows-x86_64.exe
           if-no-files-found: error
-
-  release:
-    needs: [build-cli-linux, build-cli-windows, build-gui-linux, build-gui-windows, test-linux]
-    if: always() && !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.build-cli-linux.result == 'success' && needs.test-linux.result == 'success'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-          ignore-missing: true
-      - name: Publish GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          ls -la artifacts
-          test -f artifacts/rdm-linux-x86_64
-
-          ASSETS=(artifacts/rdm-linux-x86_64)
-          if [[ -f artifacts/rdm-windows-x86_64.exe ]]; then
-            ASSETS+=(artifacts/rdm-windows-x86_64.exe)
-          fi
-          if [[ -f artifacts/rdm-gui-linux-x86_64 ]]; then
-            ASSETS+=(artifacts/rdm-gui-linux-x86_64)
-          fi
-          if [[ -f artifacts/rdm-gui-windows-x86_64.exe ]]; then
-            ASSETS+=(artifacts/rdm-gui-windows-x86_64.exe)
-          fi
-
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-            gh release create "${TAG}" "${ASSETS[@]}" \
-              --title "rdm ${TAG}" \
-              --notes "Release ${TAG} (\`${GITHUB_SHA}\`)." \
-              --verify-tag \
-              --repo "${GITHUB_REPOSITORY}"
-          else
-            TAG="nightly"
-            if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-              gh release delete "${TAG}" --yes --cleanup-tag --repo "${GITHUB_REPOSITORY}" || true
-            fi
-            gh release create "${TAG}" "${ASSETS[@]}" \
-              --title "rdm nightly" \
-              --notes "Automatic build from \`${GITHUB_REF_NAME}\` (\`${GITHUB_SHA}\`)." \
-              --prerelease \
-              --target "${GITHUB_SHA}" \
-              --repo "${GITHUB_REPOSITORY}"
-          fi
