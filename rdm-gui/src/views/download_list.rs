@@ -228,7 +228,8 @@ fn row(
 ) {
     let height = 42.0;
     let (rect, response) = ui
-        .allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::click())
+        .allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::click());
+    let response = response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(format!("{}\n{}", record.url, record.output_path));
 
@@ -240,9 +241,9 @@ fn row(
         Some(visuals.widgets.hovered.bg_fill)
     } else if idx % 2 == 1 {
         Some(if visuals.dark_mode {
-            Color32::from_white_alpha(0.04)
+            Color32::from_white_alpha(10)
         } else {
-            Color32::from_black_alpha(0.03)
+            Color32::from_black_alpha(8)
         })
     } else {
         None

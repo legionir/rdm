@@ -298,3 +298,50 @@ impl ChunkTable {
         fixed
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(id: i64, idx: i64, start: u64, end: u64) -> ChunkSpec {
+        ChunkSpec::ranged(
+            id,
+            1,
+            idx,
+            ByteRange { start, end },
+            PathBuf::from(format!("c{idx}.tmp")),
+        )
+    }
+
+    #[test]
+    fn split_appends_child_out_of_byte_order() {
+        // Three 5 MiB chunks; only the first stays active so it can be split.
+        let mut table = ChunkTable::new(vec![
+            ChunkState::new(spec(1, 0, 0, 5 * 1024 * 1024 - 1)),
+            ChunkState::new(spec(2, 1, 5 * 1024 * 1024, 10 * 1024 * 1024 - 1)),
+            ChunkState::new(spec(3, 2, 10 * 1024 * 1024, 15 * 1024 * 1024 - 1)),
+        ]);
+        table.assign(0, 0);
+        table.assign(1, 1);
+        table.assign(2, 2);
+        table.complete(1);
+        table.complete(2);
+
+        let (parent, boundary) = table
+            .split_candidate(1024 * 1024)
+            .expect("5 MiB remainder must be splittable");
+        assert_eq!(parent, 0);
+        table.split(parent, boundary).unwrap();
+        assert_eq!(table.len(), 4, "child is appended to the table");
+
+        let table_order: Vec<u64> = table.states().iter().map(|c| c.spec.range.start).collect();
+        let mut byte_order = table_order.clone();
+        byte_order.sort_unstable();
+        assert_ne!(
+            table_order, byte_order,
+            "assembly must sort by range, not table position"
+        );
+        assert_eq!(table_order.last().copied(), Some(boundary));
+        assert_eq!(byte_order[1], boundary);
+    }
+}

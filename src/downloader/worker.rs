@@ -6,6 +6,7 @@
 //! The engine can push `Adjust` (dynamic chunk split) and `Cancel` commands
 //! while a transfer is in flight.
 
+use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -397,7 +398,7 @@ async fn open_chunk_file(path: &PathBuf, offset: u64) -> Result<tokio::fs::File>
             .await
             .context("cannot create chunk directory")?;
     }
-    let file = OpenOptions::new()
+    let mut file = OpenOptions::new()
         .create(true)
         .write(true)
         .read(true)
