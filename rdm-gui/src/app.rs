@@ -942,7 +942,7 @@ impl eframe::App for RdmGuiApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
-                egui::viewport::UserAttentionType::Informational,
+                egui::UserAttentionType::Informational,
             ));
         }
 

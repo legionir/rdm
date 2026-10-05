@@ -151,11 +151,13 @@ pub fn dropped_links(
     dropped
         .iter()
         .map(|file| {
-            let text = file
-                .path
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .or_else(|| file.name.clone());
+            let text = Some(
+                file.path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .or_else(|| file.name.clone())
+                    .unwrap_or_default(),
+            );
             let uri = file
                 .path
                 .as_ref()

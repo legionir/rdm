@@ -166,7 +166,7 @@ pub fn show(
 
             ui.add_space(spacing.sm);
             ui.separator();
-            ui.label("Desktop integration").strong();
+            ui.label("Desktop integration").bold();
             ui.checkbox(
                 &mut settings.clipboard_prefill,
                 "Fill the URL from the clipboard",
