@@ -84,8 +84,8 @@ impl Confirm {
                 .to_string(),
             Confirm::RemoveCompleted => format!(
                 "This removes {subject} completed download(s) from the list and discards their \
-                 partial data. Finished files stay on disk unless the box below is ticked. \
-                 Cannot be undone."
+                 partial data. The finished files stay on disk unless you tick the box below to \
+                 delete the finished file(s) as well. Cannot be undone."
             ),
             Confirm::Restart => "This discards the progress of this download, downloads it again \
                  from the beginning and overwrites the file at the output path. Cannot be undone."
@@ -440,7 +440,7 @@ mod tests {
             assert!(body.contains("partial data"), "{:?} says what is lost", confirm);
             assert!(
                 body.contains("delete the finished file"),
-                "{:?} explains the file checkbox",
+                "{:?} explains the file checkbox and its file consequence",
                 confirm
             );
             assert!(confirm.has_file_checkbox());

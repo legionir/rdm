@@ -68,9 +68,32 @@ jobs:
           printf '::error title=rustc (exit %s)::%s\n' "$status" \
             "$(printf '%s' "$out" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
       - name: Test GUI crate
+        id: gui-tests
         working-directory: rdm-gui
         shell: bash
         run: cargo test --release
+      - name: Surface test failures
+        if: failure() && steps.gui-tests.outcome == 'failure'
+        working-directory: rdm-gui
+        shell: bash
+        run: |
+          # Same reasoning as the build step above: failing test names and
+          # assertions have to reach the review API as an annotation, because
+          # the raw job log is not always downloadable.
+          diag="${RUNNER_TEMP:-/tmp}/rdm-gui-tests.txt"
+          set +e
+          cargo test --release --no-fail-fast >"$diag" 2>&1
+          status=$?
+          out=$(grep -E '^(test .* FAILED|failures:|---- .* stdout ----|thread .* panicked|assertion|left:|right:|error\[)' "$diag" | head -60)
+          if [ -z "$out" ]; then
+            out=$(grep -E 'FAILED|panicked|assertion|test result' "$diag" | head -60)
+          fi
+          if [ -z "$out" ]; then
+            out=$(tail -60 "$diag")
+          fi
+          printf '::error title=gui tests (exit %s)::%s\n' "$status" \
+            "$(printf '%s' "$out" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+
       - name: Stage GUI binary
         shell: bash
         run: |
