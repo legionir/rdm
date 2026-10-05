@@ -121,7 +121,7 @@ clipboard pre-fill, tray, tray menu, floating drop target) on 2026-10-05.
 | 7.6 | F5 — floating drop target above the clock area (work-area + DPI), drop interpretation (text, uri-list, `.url`/`.txt`), never-silent feedback, ✕ hides and turns the setting off | 🟢 code-complete; desktop behaviour pending `UX-ESC-005` |
 | 7.7 | Flows, IA, glossary, feedback/undo policy and the in-app help updated for the new surface (entry points, exits, error points) | 🟢 |
 | 7.8 | Audits re-run and extended; a real defect in the delimiter guard fixed (escaped char literals) | 🟢 |
-| 7.9 | CI: compile + 75 GUI unit tests (was 51) + CLI regression | 🟡 four annotation-driven fix rounds (37361180868, 37361634987, 37362408563), then two runs that **never started** — GitHub could not acquire a hosted Windows runner (37362918254, 37364680078/37364684573) — re-triggered by push |
+| 7.9 | CI: compile + 75 GUI unit tests (was 51) + CLI regression | 🟢 run **37369744644** (`b478f4b`): `build-gui-windows` ✓ (Build GUI binary · Test GUI crate · Stage · Upload) and `test-windows` ✓, after four annotation-driven fix rounds (37361180868, 37361634987, 37362408563, 37366518834) and three runs that never reached a runner (37362918254, 37364680078/37364684573, 37368129718/37368133806 — GitHub could not acquire a hosted Windows runner); the `pull_request` duplicate of the green commit stayed queued |
 | 7.10 | Windows-desktop smoke test (tray, target anchor under scaling, real clipboard, exe icon, no console window) | 🔴 open — `UX-ESC-005` (QA) |
 
 ## Discovered work (added with a reason, never silently)

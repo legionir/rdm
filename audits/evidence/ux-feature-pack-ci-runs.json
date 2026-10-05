@@ -82,5 +82,29 @@
   ],
   "escalation": "UX-ESC-005 (P1, owner QA)",
   "note_ph6_baseline": "when a runner is available the GUI job takes ~2m15s (run 37358775197), so queue starvation \u2014 not build time \u2014 is the blocker",
-  "pending": "GUI test result for 680d5f3 (and later) pending a runner"
+  "pending": "none for the code at b478f4b; documentation commits after it are docs-only",
+  "green": {
+    "run": 37369744644,
+    "sha": "b478f4b",
+    "event": "push",
+    "conclusion": "success",
+    "jobs": {
+      "build-gui-windows": {
+        "id": 111963645839,
+        "steps": [
+          "Build GUI binary success",
+          "Surface compiler errors skipped (no errors)",
+          "Test GUI crate success (75 unit tests)",
+          "Surface test failures skipped (none)",
+          "Stage GUI binary success",
+          "Upload GUI artifact success"
+        ]
+      },
+      "test-windows": {
+        "id": 111963646178,
+        "conclusion": "success"
+      }
+    },
+    "note": "the pull_request duplicate for the same sha (37369748949) stayed queued and never got a runner"
+  }
 }

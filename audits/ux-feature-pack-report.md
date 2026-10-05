@@ -158,8 +158,8 @@ starts `rdm-gui.exe` from Explorer with no console present and verifies no windo
 | Bug A fixed (no doubling, legacy files still load) | `settings.rs` round-trip tests; CI `Test GUI crate` | ✅ proven |
 | Bug B fixed (no console child) | `CREATE_NO_WINDOW` on the only spawn; grep shows no other process spawn in `rdm-gui` | ✅ proven in code |
 | Icon pipeline (exe, window, tray) | `assets/generate_icon.py` re-runs deterministically; `icon.rs` tests; `build.rs` embeds the `.ico` on Windows | ✅ proven |
-| All GUI unit tests pass (75 `#[test]`, was 51) | CI `build-gui-windows` → `Test GUI crate` | ✅ once the green run lands (IDs in evidence) |
-| CLI/engine regression untouched | CI `test-windows` | ✅ |
+| All GUI unit tests pass (75 `#[test]`, was 51) | CI run 37369744644 (`b478f4b`): job `build-gui-windows` → **Build GUI binary ✓ · Test GUI crate ✓ · Stage GUI binary ✓ · Upload GUI artifact ✓** (the exe, icon embedded, was built and uploaded) | ✅ **proven** |
+| CLI/engine regression untouched | CI run 37369744644 → job `test-windows` ✓ | ✅ **proven** |
 | Copy rules and contrast still hold | `audits/ux-terminology-check.py` (15 user-facing files), `audits/ui-contrast-check.py` (27 Rust files) | ✅ PASS |
 | **Tray icon appears, menu works while hidden, close really hides** | needs a Windows desktop | ❌ **NOT VERIFIED here → UX-ESC-005 (QA smoke test)** |
 | **Dragging a real browser link onto the target** | needs a browser + Windows desktop | ❌ **NOT VERIFIED here → UX-ESC-005** |
@@ -176,9 +176,11 @@ escalation (§11).
 | --- | --- | --- |
 | 37362918254, 37364680078 / 37364684573, 37368129718 / 37368133806 | `eeb9880`, `3e0cbfb`, `680d5f3` | “The job was not acquired by Runner of type hosted even after multiple attempts” — the `build-gui-windows` job queued for 12–15 min and was cancelled without running a single step. The `test-windows` job (CLI/engine) passed in the same runs, and run 37366518834 did reach a GUI runner and compiled the **whole** feature pack (tray, drop target, icon build script) — its only error was the duplicate test module fixed in `680d5f3`. |
 
-That is an infrastructure failure on the GitHub side, not a code failure, and it is why the
-GUI test result for this increment is still pending. The runs are re-triggered by pushing; the
-workflow file itself is out of scope (`UX-ESC-003`) and was not touched to work around it.
+That is an infrastructure failure on the GitHub side, not a code failure. It resolved on the
+push run **37369744644** (`b478f4b`) — `build-gui-windows` ✓ (build · 75 GUI tests · stage ·
+upload) and `test-windows` ✓ — while the `pull_request` run for the *same* commit
+(37369748949) was still stuck in the queue. The workflow file is out of scope (`UX-ESC-003`) and
+was not touched to work around the queue; runs are simply re-triggered by pushing.
 
 ## 10. Change manifest (this increment)
 
