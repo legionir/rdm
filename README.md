@@ -123,8 +123,9 @@ vice versa.
 Beyond the CLI surface the window adds:
 
 * **Sidebar panels** — *Queue* and *Settings* live in sidebars toggled from
-  the top menu bar. Settings include a dark/light theme switch and 📂 buttons
-  that pick directories in the native file explorer.
+  the top menu bar. Settings include a dark/light theme switch, 📂 buttons
+  that pick directories in the native file explorer, and a *Desktop
+  integration* group (see below).
 * **Download queue** — at most `max_concurrent` transfers run at once
   (default 3, `0` = unlimited); the rest wait in the *Queue* sidebar and can be
   dropped individually or all at once (emptying a queue of five or more asks
@@ -135,9 +136,28 @@ Beyond the CLI surface the window adds:
   box (`off`..`trace`), also settable with `-v` / `-vv` / `-vvv`, and `RUST_LOG`
   still wins.
 * **Help in the app** — `F1` (or the ⓘ button in the filter row) opens the help
-  window: what every state means and what to do next, the keyboard map, and the
-  words rdm uses. The same state definitions are on every state chip and on the
-  status-bar counters as tooltips.
+  window: what every state means and what to do next, the keyboard map, the
+  words rdm uses, and what closing, the tray and the drop target do. The same
+  state definitions are on every state chip and on the status-bar counters as
+  tooltips.
+
+**Desktop integration** (Settings → *Desktop integration*, the tray menu, or
+`settings.toml`):
+
+| Switch | Default | What it does |
+| --- | --- | --- |
+| *Fill the URL from the clipboard* | on | *New download* — toolbar or tray — inserts a link that is on the clipboard and selects it, so `Enter` starts the download immediately |
+| *Keep running in the tray* | on | Closing the window hides it in the notification area instead of quitting; transfers continue, the tray menu (and a click on the icon) brings the window back, and *Quit rdm* really exits. Without a tray host the normal close behaviour is kept, so the window can never become unreachable |
+| *Floating drop target* | off | A small always-on-top box above the taskbar clock: drag a link from the browser onto it and the *New download* form opens with that link. Its ✕ hides it and turns the switch off |
+
+Links and files dropped on the window itself take the same path (plain text,
+`text/uri-list`, `.url` and `.txt` files holding a link). A drop that is not a
+link is reported in the status bar instead of being silently ignored.
+
+The application icon is generated from the app's own palette by
+`rdm-gui/assets/generate_icon.py` (no third-party libraries): the `.ico` is
+embedded into `rdm-gui.exe` at build time, and the same pixels are the window,
+taskbar and tray icon.
 * **Confirmations** — destructive actions ask first and name the consequence:
   *Remove* (one or all completed downloads) and *Restart from scratch* (which
   discards the progress and overwrites the file). The dialog says what is lost

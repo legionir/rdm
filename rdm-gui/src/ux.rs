@@ -207,6 +207,17 @@ pub const SHORTCUTS: [(&str, &str); 8] = [
 ];
 
 /// One section of the in-app help: a heading and its lines.
+/// Desktop-integration facts (tray, clipboard, drop target) — the words the
+/// Settings checkboxes and the in-app help share, in one list.
+pub const DESKTOP_HELP: [&str; 6] = [
+    "Closing the window hides rdm in the notification area (the tray); transfers keep running and “Quit rdm” there really exits.",
+    "A session without a tray host keeps the usual close behaviour, so rdm never hides where it cannot be reached.",
+    "New download fills the URL from the clipboard when it holds a link, and selects it: Enter starts the transfer.",
+    "The floating drop target is a small always-on-top box above the taskbar clock — drop a link from a browser on it and the New download form opens with that link.",
+    "A link or file dropped on the window itself takes the same path; anything that is not a link is reported in the status bar instead of being ignored.",
+    "Settings → Desktop integration holds those three switches; the tray menu toggles the floating drop target too.",
+];
+
 pub fn help_sections() -> Vec<(&'static str, Vec<String>)> {
     vec![
         (
@@ -222,6 +233,10 @@ pub fn help_sections() -> Vec<(&'static str, Vec<String>)> {
                 .iter()
                 .map(|(keys, what)| format!("{keys} — {what}"))
                 .collect(),
+        ),
+        (
+            "Window, tray and desktop",
+            DESKTOP_HELP.iter().map(|line| line.to_string()).collect(),
         ),
         (
             "Words used by rdm",
@@ -585,7 +600,7 @@ mod tests {
     #[test]
     fn help_covers_states_shortcuts_and_vocabulary() {
         let sections = help_sections();
-        assert_eq!(sections.len(), 3);
+        assert_eq!(sections.len(), 4);
         for (heading, lines) in &sections {
             assert!(!heading.is_empty());
             assert_eq!(
@@ -593,9 +608,21 @@ mod tests {
                 match *heading {
                     "What the states mean" => ALL_STATES.len(),
                     "Keyboard" => SHORTCUTS.len(),
+                    "Window, tray and desktop" => DESKTOP_HELP.len(),
                     _ => GLOSSARY.len(),
                 },
                 "{heading} lists every entry"
+            );
+        }
+        // The new section has to answer the questions closing/tray raise.
+        let desktop = sections
+            .iter()
+            .find(|(heading, _)| *heading == "Window, tray and desktop")
+            .expect("the desktop section is part of help");
+        for word in ["tray", "clipboard", "drop target"] {
+            assert!(
+                desktop.1.iter().any(|line| line.contains(word)),
+                "the help mentions {word}"
             );
         }
     }
