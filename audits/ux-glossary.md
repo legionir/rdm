@@ -30,6 +30,10 @@ happened. The glossary fixes one preferred term per concept and forbids the rest
 | **Restart** | download again from the beginning (progress is discarded, the file is overwritten) | Retry, Redo, Reload | row ⟲, dialog *Restart from scratch* |
 | **Details** | the technical view of one download (state, sizes, partial data, events, JSON) | Info (as a window title), Properties | row double-click / Enter, `rdm info` |
 | **Help** | the in-app window (`F1`) that explains states, keyboard and vocabulary | documentation, manual, FAQ | toolbar ⓘ, `F1`, empty-list hint |
+| **tray / notification area** | the Windows notification area next to the clock, where rdm keeps its icon while the window is hidden; the menu there holds the frequent actions | system tray (as a user-facing word), taskbar icon | tray menu, Settings (*Keep running in the tray*), Help → *Window, tray and desktop* |
+| **Floating drop target** | the optional small always-on-top box above the clock area; a link dropped on it opens the New-download form pre-filled | floating button, dock, widget | Settings → *Desktop integration*, tray menu, Help |
+| **clipboard pre-fill** | *New download* inserting a link that is on the clipboard, selected, so `Enter` starts it | auto-fill, paste-on-open | Settings → *Fill the URL from the clipboard*, Help |
+| **drop a link** | handing rdm a link by dragging it (from a browser) onto the target or the window; anything that is not a link is *explained*, never ignored | drag-and-drop import, capture | target hint, status bar, Help |
 
 ### State vocabulary (the same words everywhere)
 
@@ -57,6 +61,7 @@ deliberately distinguished, because the user's next action differs:
 | R7 | Every icon-only control has a tooltip that names the action (and the CLI equivalent where useful). | UI increment (`components::icon_button`) + review |
 | R8 | Errors say what happened, what was kept, and what to do next. | §4 of the feedback/error/undo policy |
 | R9 | Every term in this glossary is explained in-app, without hovering (Help → *Words used by rdm*). | `ux::help_sections` (unit-tested) |
+| R10 | Desktop-integration copy uses the tray, drop-target and clipboard words from this glossary, and the in-app help repeats the three switches in the same words as Settings. | `ux::DESKTOP_HELP` + `help_sections` (unit-tested: the section must mention *tray*, *clipboard*, *drop target*) |
 
 ## 4. Documented exceptions (terms that are allowed to differ)
 

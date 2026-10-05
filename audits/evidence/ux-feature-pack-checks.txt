@@ -1,0 +1,52 @@
+rdm - desktop-integration increment: static verification evidence
+generated: 2026-10-05T19:55:20Z  (UTC)
+tree: 3e0cbfb + uncommitted increment
+
+=== audits/ui-contrast-check.py ===
+rdm — UI design-token verification (static)
+source: rdm-gui/src/theme/tokens.rs
+contract: 8 roles × surfaces, 8 surfaces, 2 themes
+
+== 1/2. WCAG contrast contract ==
+  [ok] dark: worst text pair danger #FF8A8A on surface_hover = 5.01:1 (AA min 4.5:1)
+  [ok] light: worst text pair danger #B91C1C on surface_hover = 5.18:1 (AA min 4.5:1)
+  [ok] dark: focus ring visible on all 8 surfaces
+  [ok] light: focus ring visible on all 8 surfaces
+
+== 3/4. Token discipline in the views ==
+  [ok] 9 UI files: no colour literals, all use `theme::`
+
+== 5. Static sanity of the changed Rust files ==
+  [ok] 27 Rust files: delimiters balanced
+
+RESULT: PASS — all checks green
+
+=== audits/ux-terminology-check.py ===
+rdm — UX terminology & microcopy check
+root: /home/user/rdm
+
+== 1. Preferred terminology ==
+  [ok] no banned terminology in 15 user-facing files
+
+== 2. Destructive actions: confirmation + consequence copy ==
+  [ok] Remove download: confirmed in rdm-gui/src/app.rs::confirm_dialog
+  [ok] Remove completed: confirmed in rdm-gui/src/app.rs::remove_completed_now
+  [ok] Restart from scratch: confirmed in rdm-gui/src/app.rs::restart_now
+  [ok] Drop one queued download: no confirmation required (nothing is discarded yet)
+  [ok] Drop all queued downloads: confirmed in rdm-gui/src/app.rs::drop_queue_now
+  [ok] the remove copy names the action
+  [ok] the remove copy says what is discarded
+  [ok] destructive copy states the undo status
+  [ok] the remove copy explains the file checkbox
+  [ok] the restart copy says the progress is discarded
+  [ok] the bulk remove asks first
+  [ok] the restart asks first
+  [ok] one switch governs the confirmations
+  [ok] a long queue asks before it is emptied
+
+== 3. Cross-surface consistency (CLI talk == GUI talk == README) ==
+  [ok] CLI help/README must describe removal as removing a download, not a record
+  [ok] preferred term 'Download' present in ['README.md', 'src/cli/commands.rs']
+  [ok] preferred term 'downloads' present in ['README.md', 'src/cli/commands.rs']
+
+RESULT: PASS — terminology and microcopy rules hold

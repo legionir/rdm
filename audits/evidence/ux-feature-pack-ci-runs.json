@@ -1,0 +1,60 @@
+{
+  "increment": "desktop integration + reported defects (UX increment 2)",
+  "branch": "arena/01a10cef-rdm",
+  "ci": [
+    {
+      "run": 37361180868,
+      "sha": "472414b",
+      "event": "push",
+      "conclusion": "failure",
+      "cause": "code",
+      "detail": "first compile round: egui::viewport::UserAttentionType path, Option<&str> mismatches in dropzone/util, Response::strong() on settings_view"
+    },
+    {
+      "run": 37361634987,
+      "sha": "9080ba1",
+      "event": "push",
+      "conclusion": "failure",
+      "cause": "code",
+      "detail": "second round: DroppedFile::name is String, Response has no bold()"
+    },
+    {
+      "run": 37362408563,
+      "sha": "f7dfa04",
+      "event": "push",
+      "conclusion": "failure",
+      "cause": "code",
+      "detail": "third round: ux.rs test array mixed &str with String (test target)"
+    },
+    {
+      "run": 37362918254,
+      "sha": "eeb9880",
+      "event": "push",
+      "conclusion": "infrastructure",
+      "cause": "infrastructure",
+      "detail": "job never started: 'The job was not acquired by Runner of type hosted even after multiple attempts' (test-windows job passed)"
+    },
+    {
+      "run": 37364680078,
+      "sha": "3e0cbfb",
+      "event": "push",
+      "conclusion": "infrastructure",
+      "cause": "infrastructure",
+      "detail": "build-gui-windows cancelled for the same reason; the pull_request run 37364684573 for the same SHA failed identically"
+    }
+  ],
+  "audits": {
+    "ui-contrast-check": "PASS (27 Rust files)",
+    "ux-terminology-check": "PASS (15 user-facing files)"
+  },
+  "local_toolchain": "none available in this environment; Rust compile/tests are verified through the CI job only",
+  "not_verified_here": [
+    "tray icon appearance and menu behaviour while the window is hidden",
+    "drag-and-drop from a real browser onto the floating target",
+    "anchor above the taskbar clock at 100/125/150% DPI and with the taskbar on any edge",
+    "the Windows clipboard path end to end",
+    "the icon Explorer shows for the built exe",
+    "absence of a console window for the shipped exe"
+  ],
+  "escalation": "UX-ESC-005 (P1, owner QA)"
+}

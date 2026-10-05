@@ -390,3 +390,43 @@ Next Action: review/approve on PR #8; decide UX-ESC-002/003/004; then REC-UX-001
   starting with the research study, which is the only way to turn the task-success KPI
   from Unknown into data. Nothing else remains open that UX can close on its own.
 ```
+
+---
+
+## Increment 2 — desktop integration and reported defects (2026-10-05)
+
+Trigger: the product owner reported two defects (a Windows path that doubles its backslashes on
+every save; a terminal window that appears with the app) and ordered five Windows-facing features
+(icon, clipboard pre-fill, tray + menu, floating drop target). Full record:
+`audits/ux-feature-pack-report.md`; plan phase PH-7; flows T12 + §4 rows; glossary R10.
+
+```
+Status: PARTIAL - implemented, compiled and unit-tested; desktop behaviour unverified here
+Verdict: Both defects fixed in the code and pinned by tests; F1-F5 implemented and wired into
+  the flows (entry points, exits, error points documented). No usability claim is made for the
+  tray, the floating target, the real clipboard path or the exe icon until QA runs the smoke
+  test (UX-ESC-005).
+State:   Branch arena/01a10cef-rdm, HEAD 3e0cbfb + this documentation commit; PR #8 updated.
+Coverage: Bug A (escape/parse symmetry + 5-round round-trip test), Bug B (CREATE_NO_WINDOW on
+  the only spawn; the windows_subsystem attribute was already correct), F1 icon pipeline,
+  F2 clipboard pre-fill (+switch/tooltip), F3/F4 tray + menu + close-to-tray + Quit + no-tray
+  fallback, F5 floating drop target (+drop interpretation, never-silent feedback), help
+  overlay + README + flows/IA/glossary/policy.
+Findings: D-11 (backslash doubling, root cause: escape without decoder), D-12 (--data-dir lost
+  to the saved value), D-13 (tray events were only polled inside a frame - would have made the
+  tray useless while hidden), D-14 (the audit tool's delimiter guard mis-skipped escaped char
+  literals), D-15 (two CI runs never started: hosted runner unavailable), D-16 (root
+  .gitignore added to keep audit bytecode out of the tree - flagged for approval).
+Changes: 23 source/asset files for the features + the audit tooling/doc set; all in the Change
+  Manifest of the report (no silent change).
+Tests:  GUI unit tests 51 -> 75 (all compile in CI); audits/ui-contrast-check.py PASS (27
+  files), audits/ux-terminology-check.py PASS (15 user-facing files).
+Evidence: audits/evidence/ux-feature-pack-checks.txt, ux-feature-pack-ci-runs.json.
+ExecutionPlan: audits/ux-designer-execution-plan.md - PH-7 (7.1-7.8 done, 7.9 depends on CI,
+  7.10 open with UX-ESC-005).
+Escalation: UX-ESC-005 (P1) - Windows-desktop smoke test for tray/target/clipboard/exe icon;
+  owner QA, Design Manager informed. UX-ESC-001...004 remain open as recorded above.
+Next Action: QA runs the six-step checklist in the report; Design Manager approves the new
+  surface against the flows document; Product decides whether the drop target should also be
+  offered on first run (today it is opt-in).
+```

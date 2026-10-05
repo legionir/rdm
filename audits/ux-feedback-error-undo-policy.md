@@ -108,3 +108,21 @@ tone, the text carries the meaning).
    a one-line policy change (`DESTRUCTIVE`, `Confirm::None` → `Confirm::DropOne`).
 3. **Confirmations can be switched off** for expert users; the outcome message then carries the
    consequence.
+
+## 7. Desktop integration (increment 2): hide, quit and drop
+
+| Action | Confirmation? | Feedback | Recovery |
+| --- | --- | --- | --- |
+| Window ✕ / Alt-F4 with *Keep running in the tray* on and a tray host present | **no dialog** — nothing is destroyed; the transfer keeps running | window disappears from the taskbar; App log: `window hidden — rdm keeps running in the tray (Quit there to exit)`; the tray icon remains | *Show rdm*, a click on the icon, or the tray's *New download* brings the window back (focused, with a taskbar flash) |
+| Window ✕ with **no** tray host (or the setting off) | as before: the app quits | App log on start-up: `no system tray available — closing the window will quit` | start rdm again — nothing is lost: downloads resume from the metadata database |
+| Tray → *Quit rdm* with transfers running | no dialog — but it is the *explicit* exit, and it is the only place that exits while hidden | App log: `paused N running download(s) on exit` (5 s graceful shutdown) | restart rdm; paused downloads continue with ▶ Resume |
+| Tray → *New download (from clipboard)* with an empty / non-link clipboard | no dialog | form opens empty; App log: `no link on the clipboard — opening the form empty` | paste the link by hand — the dialog behaves exactly like the toolbar entry |
+| Drop a link on the target / the window | no dialog (a drop is an intent, not a destructive act) | target shows *Link accepted — the New download form opened with <link>*; window opens with the URL filled and selected; App log names the link | `Esc` closes the form; nothing was queued |
+| Drop something that is **not** a link | — | a sentence where the drop happened **and** in the status bar (“that drop was not a link…”) | nothing to recover — nothing happened, and the user was told so (never a silent no-op) |
+| ✕ on the floating target | none needed: it hides a helper window | target disappears; App log: `floating drop target hidden`; the Settings switch follows | Settings → *Desktop integration* → *Floating drop target* (or the tray menu item) |
+
+**Policy decisions recorded here.** (a) Closing never *asks* because it is not destructive when the
+tray is there — and when the tray is not there it is a normal exit, which the user asked for.
+(b) *Quit rdm* is deliberately the only explicit exit visible while the window is hidden, so
+“close” and “quit” can never be confused. (c) A drop always produces a sentence: silence would
+make a failed drag look like a broken app, which is the same defect class as FIND-UX-003.

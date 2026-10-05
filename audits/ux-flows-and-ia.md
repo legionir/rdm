@@ -31,6 +31,17 @@ rdm (product)
     └── Status bar (footer)
         ├── one-line status + counters (hover = state legend*)
         └── expandable panes: Events · App log
+
+Desktop surface (outside the window — increment 2)
+├── Tray icon (notification area)
+│   ├── left click → restore the window
+│   └── menu: Show rdm · New download (from clipboard) · Pause all · Resume all ·
+│             Floating drop target ✓ · Quit rdm
+├── Window ✕ → hides in the tray when *Keep running in the tray* is on and a tray
+│   host exists (Quit rdm there really exits); without a tray host it quits as before
+├── Floating drop target (opt-in)  ← small always-on-top box above the taskbar clock;
+│   drop a link from the browser → New download opens pre-filled; ✕ hides it + turns the switch off
+└── Drop anywhere on the window   ← same path as the target (text, uri-list, .url/.txt files)
 ```
 
 **Navigation model.** One window, no page stack: the list is always visible and everything else
@@ -84,6 +95,7 @@ them ends in a state that still holds the progress.
 | T8 | Re-download a file | row ⟲ / `rdm download --force` | dialog (progress + overwrite) → Restart | new transfer from byte 0 | output file locked by another process → engine error in status + Events |
 | T9 | Limit concurrency | toolbar chip → ☰ Queue; Settings → *Max concurrent downloads* | raise/lower limit → queued items start | queue drains; chip disappears when empty | `0` = unlimited (documented in the label tooltip) |
 | T11 | Learn the product in the app | `F1` / toolbar ⓘ / the empty-list hint | read states → keyboard → vocabulary | help closes with `Esc`/`Close` and leaves the list untouched | — (help is read-only) |
+| T12 | Start from a link you already have | toolbar *New download* (clipboard pre-fill*) · tray *New download (from clipboard)* · drop the link on the floating target* or on the window* | copy/drag the link → *New download* fills and selects the URL (or the drop opens the form) → *Start* | row appears as Queued → Running; the log names the link a drop accepted | clipboard empty / not a link → form opens empty + log line “no link on the clipboard — opening the form empty”; dropping something that is not a link → a sentence in the target and the status bar (never silent) |
 | T10 | Diagnose a failure | status bar → **Events** / **App log** | read the machine-level messages | the exact engine error text | App log empty until something is logged (hint says so) |
 
 ## 4. Entry points, exits and error points per screen
@@ -97,6 +109,8 @@ them ends in a state that still holds the progress.
 | Settings sidebar | toolbar ⚙ | ☰/⚙ ✓, *Save* ✓ / *Reload* ✓ | `unsaved changes` banner*; save failure reported in the status bar; *Apply data directory* failure reported with the path |
 | Footer panes | status bar *Events* / *App log* | ✕ ✓ / `Esc` ✓ / button again ✓ | “select a download to see its events”, “no events recorded”, “nothing logged yet*” |
 | Confirm dialog | destructive row/toolbar actions | *Remove/Restart* ✓ / *Keep* ✓ / `Esc` ✓ | — (the dialog is itself the error-prevention step) |
+| Tray menu (increment 2) | tray icon right click; icon left click restores the window | *Show rdm* ✓ / *New download* ✓ (opens the form) / *Quit rdm* ✓ (real exit, 5 s graceful pause) | no tray host → the entry does not exist and closing quits (logged); a build failure of the tray keeps the window reachable |
+| Floating drop target (increment 2) | Settings → *Desktop integration* → *Floating drop target*; tray menu item | ✕ on the target ✓ (hides it and turns the switch off, nothing destroyed) / switch off ✓ | drop that is not a link → explanation where the drop happened + status bar; setting cannot be saved → error logged, the target still follows the setting in memory |
 
 ## 5. Bulk-action flows (safety-critical)
 

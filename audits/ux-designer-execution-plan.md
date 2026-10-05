@@ -105,6 +105,25 @@ Closure verification: CI run 37357552644 on `15cf0ed` (build ✓, `Test GUI crat
 12 UX policy tests, CLI regression ✓) + `audits/ux-terminology-check.py` PASS +
 `audits/ui-contrast-check.py` PASS (21 Rust files incl. the new `help_overlay.rs`).
 
+## PH-7 — Reported defects + desktop integration (2nd follow-up increment) `[🟡]`
+
+Trigger: the product owner reported two defects (a Windows path that doubles its backslashes,
+a terminal window that appears with the app) and asked for five Windows-facing features (icon,
+clipboard pre-fill, tray, tray menu, floating drop target) on 2026-10-05.
+
+| Step | Work | Status |
+| --- | --- | --- |
+| 7.1 | Bug A — `escape()`/`parse()` symmetry (only what the loader understands), five-round round-trip test, legacy over-escaped files still load; `--data-dir` no longer loses to the saved value | 🟢 |
+| 7.2 | Bug B — `CREATE_NO_WINDOW` on the only process spawn in the GUI; grep-verified that no other spawn exists | 🟢 |
+| 7.3 | F1 — deterministic icon generator (stdlib only), `.ico` embedded by `build.rs`, one RGBA buffer for window + tray, tests that fail on a broken asset | 🟢 |
+| 7.4 | F2 — clipboard pre-fill (toolbar + tray), URL field focused and selected, switch and tooltip that follow the setting, empty/invalid clipboard explained in the log | 🟢 |
+| 7.5 | F3/F4 — tray icon and menu (Show · New download · Pause all · Resume all · drop target · Quit); Close hides and Quit exits; no-tray fallback keeps the normal close | 🟢 code-complete; desktop behaviour pending `UX-ESC-005` |
+| 7.6 | F5 — floating drop target above the clock area (work-area + DPI), drop interpretation (text, uri-list, `.url`/`.txt`), never-silent feedback, ✕ hides and turns the setting off | 🟢 code-complete; desktop behaviour pending `UX-ESC-005` |
+| 7.7 | Flows, IA, glossary, feedback/undo policy and the in-app help updated for the new surface (entry points, exits, error points) | 🟢 |
+| 7.8 | Audits re-run and extended; a real defect in the delimiter guard fixed (escaped char literals) | 🟢 |
+| 7.9 | CI: compile + 75 GUI unit tests (was 51) + CLI regression | 🟡 four annotation-driven fix rounds (37361180868, 37361634987, 37362408563), then two runs that **never started** — GitHub could not acquire a hosted Windows runner (37362918254, 37364680078/37364684573) — re-triggered by push |
+| 7.10 | Windows-desktop smoke test (tray, target anchor under scaling, real clipboard, exe icon, no console window) | 🔴 open — `UX-ESC-005` (QA) |
+
 ## Discovered work (added with a reason, never silently)
 
 | # | Discovery | Reason it was added | Status |
@@ -119,6 +138,12 @@ Closure verification: CI run 37357552644 on `15cf0ed` (build ✓, `Test GUI crat
 | D-8 | The CLI's failed summary told users to run `rdm resume <ID>`, which the same CLI refuses for a failed download | Same defect class as FIND-UX-003 (dead-end recovery path), found by re-reading the summary against `run_resume` | 🟢 PH-6.5 |
 | D-9 | The two CI-diagnostic steps are load-bearing: the closure increment's three compile issues (module wiring, token names, egui builder API) were found **only** through check-run annotations | Confirms `UX-ESC-003`: without the steps, GUI regressions in this environment are undiagnosable | 🟢 (recorded) |
 | D-10 | The bulk `resume_all` scope fix (FIND-UX-004) changes behaviour documented in the README | Requirement-owner decision → escalated, not decided here | 🟢 (recorded, `UX-ESC-002`) |
+| D-11 | Every save/load cycle doubled the backslashes of a Windows path (`download_dir = C:\download\rdm` → `C:\\download\\rdm` → …) | Reported by the product owner; root-caused in PH-7.1: `escape()` had no matching decoder in `parse()` | 🟢 |
+| D-12 | `--data-dir DIR` was silently replaced by the value stored in the settings file (and thus lost across reloads) | Found while fixing D-11 and testing the parser; the flag describes the run, so it now wins and the file keeps its own directory | 🟢 |
+| D-13 | The first version of the tray read its events only inside a frame — a window hidden in the tray runs a frame only when asked, so *Show* / *New download* would have reacted late or never | Found by reviewing the tray code before CI; fixed with two relay threads that map events to commands and wake the window (`Context::request_repaint_of(ROOT)`) | 🟢 |
+| D-14 | The delimiter guard in `audits/ui-contrast-check.py` skipped one character too many for escaped char literals (`'\n'`), reporting `{`/`}` as unbalanced in files that use them | Found by running the guard on the new files; the guard is itself evidence, so a false FAIL would have been a false alarm on a green tree | 🟢 |
+| D-15 | Two CI runs never started: “The job was not acquired by Runner of type hosted even after multiple attempts” (GitHub infrastructure) | Recorded so the red run list is not read as a code failure; re-triggered by pushing (the workflow file is out of scope, `UX-ESC-003`) | 🟢 (recorded) |
+| D-16 | A root `.gitignore` was added to keep `audits/__pycache__/*.pyc` (produced by running the audit scripts) out of the tree | Scope note: a new file at the repository root, flagged for approval; nothing existing was changed and no bytecode was ever committed | 🟢 (flagged) |
 
 ## Verification results (final)
 
@@ -129,6 +154,9 @@ Closure verification: CI run 37357552644 on `15cf0ed` (build ✓, `Test GUI crat
 | Rust compile + GUI tests | PASS | CI runs 37350073234 (`3eb2def`) and 37350848407 (`47253af`); CLI regression job `test-windows` ✓ |
 | CLI/engine regression | PASS | CI run → job `test-windows` |
 | Baseline (before) evidence | recorded | `audits/evidence/ux-baseline-*.txt` |
+| Desktop integration (increment 2): flows, copy, help and README | PASS (static) | `audits/ux-feature-pack-report.md`, `audits/evidence/ux-feature-pack-checks.txt` |
+| Bug A round-trip (5 save/load cycles, legacy files) | PASS | `settings.rs` unit tests → CI `Test GUI crate` |
+| Tray / floating target / real clipboard / exe icon on a Windows desktop | **NOT RUN — NOT_APPLICABLE in this environment** | `UX-ESC-005` (QA smoke-test checklist) |
 | User testing | **MISSING — NOT_APPLICABLE in this environment** | `UX-ESC-001` |
 
 ## Rule compliance notes
