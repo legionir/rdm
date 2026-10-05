@@ -14,6 +14,7 @@ pub mod components;
 pub mod contrast;
 pub mod tokens;
 
+pub use components::Level;
 pub use tokens::{
     state_glyph, Breakpoints, LayoutMode, Palette, Radii, Sizes, Spacing, Table, Tokens, Typography,
 };

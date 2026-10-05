@@ -25,8 +25,10 @@ pub struct Tokens {
 }
 
 impl Tokens {
-    pub fn for_dark(dark: bool) -> Self {
-        if dark {
+    /// Tokens for the requested theme; `dark_mode` is the same flag the
+    /// palette carries, so the two can never drift apart.
+    pub fn for_dark(dark_mode: bool) -> Self {
+        if dark_mode {
             dark()
         } else {
             light()
@@ -258,9 +260,7 @@ pub struct Spacing {
     pub button: Vec2,
     /// Global `interact_size`.
     pub interact: Vec2,
-    /// Table row internals.
-    pub table_pad: f32,
-    pub table_gap: f32,
+    /// Table row height (the column padding lives in [`Table`]).
     pub row_height: f32,
     /// Icon buttons inside a table row (tighter than the global padding).
     pub icon_button: Vec2,
@@ -282,8 +282,6 @@ impl Default for Spacing {
             item: Vec2::new(8.0, 8.0),
             button: Vec2::new(12.0, 6.0),
             interact: Vec2::new(40.0, 22.0),
-            table_pad: 8.0,
-            table_gap: 8.0,
             row_height: 42.0,
             icon_button: Vec2::new(7.0, 4.0),
             icon_gap: 5.0,
@@ -374,6 +372,9 @@ pub struct Sizes {
 /// the rest are fixed widths managed by `views::download_list::Columns`.
 #[derive(Debug, Clone, Copy)]
 pub struct Table {
+    /// Horizontal padding inside a row, and the gap between two columns.
+    pub pad: f32,
+    pub gap: f32,
     pub state: f32,
     pub file_ideal: f32,
     pub file_min: f32,
@@ -435,6 +436,8 @@ impl Default for Sizes {
 impl Default for Table {
     fn default() -> Self {
         Table {
+            pad: 8.0,
+            gap: 8.0,
             state: 82.0,
             file_ideal: 140.0,
             file_min: 80.0,
