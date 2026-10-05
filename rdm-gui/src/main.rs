@@ -117,12 +117,13 @@ fn run(
     eframe::run_native(
         "RDM",
         options,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
             match app::RdmGuiApp::new(
                 data_dir.clone(),
                 data_dir_explicit,
                 logging.clone(),
                 forced_level,
+                cc.egui_ctx.clone(),
             ) {
                 Ok(app) => Ok(Box::new(app) as Box<dyn eframe::App>),
                 Err(err) => Err(Box::<dyn std::error::Error + Send + Sync>::from(format!(

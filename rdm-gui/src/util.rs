@@ -61,7 +61,7 @@ mod tests {
                 ..Default::default()
             },
             egui::DroppedFile {
-                name: Some("https://example.com/dropped.bin".to_string()),
+                name: "https://example.com/dropped.bin".to_string(),
                 ..Default::default()
             },
         ];
@@ -155,7 +155,7 @@ pub fn dropped_links(
                 file.path
                     .as_ref()
                     .map(|p| p.display().to_string())
-                    .or_else(|| file.name.clone())
+                    .or_else(|| (!file.name.is_empty()).then(|| file.name.clone()))
                     .unwrap_or_default(),
             );
             let uri = file

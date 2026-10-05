@@ -57,6 +57,7 @@ impl RdmGuiApp {
         data_dir_explicit: bool,
         logging: Option<LogControl>,
         forced_level: Option<&'static str>,
+        ctx: egui::Context,
     ) -> anyhow::Result<Self> {
         let backend = Backend::new(&data_dir)?;
         let settings = SettingsStore::new(&data_dir, data_dir_explicit);
@@ -100,7 +101,7 @@ impl RdmGuiApp {
 
         // Tray: absent in sessions without a tray host; the app then closes
         // normally instead of hiding into a tray that is not there.
-        app.tray = Tray::new(app.drop_target_shown);
+        app.tray = Tray::new(app.drop_target_shown, ctx);
         if app.tray.is_none() {
             app.state
                 .push_log("warn", "no system tray available — closing the window will quit");

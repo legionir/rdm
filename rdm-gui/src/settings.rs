@@ -214,9 +214,10 @@ pub struct SettingsStore {
     path: PathBuf,
     last_modified: Option<SystemTime>,
     settings: AppSettings,
-    /// `--data-dir` from the command line: it wins over the saved value and is
-    /// never written back to the file (the flag describes this run, not the
-    /// user's preference).
+    /// `--data-dir` from the command line: it wins over the value saved in the
+    /// file, for this load and every hot reload. It is also what the file ends
+    /// up recording — the file lives inside that directory, so the recorded
+    /// directory is always its own and can never point somewhere else.
     cli_data_dir: Option<String>,
 }
 

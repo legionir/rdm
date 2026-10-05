@@ -1,7 +1,7 @@
 //! Settings sidebar: defaults for new downloads + app behaviour.
 //! Toggled from the top menu.
 
-use egui::{Align, Layout, Ui};
+use egui::{Align, Layout, RichText, Ui};
 
 use crate::settings::AppSettings;
 use crate::state::{GuiState, UiAction};
@@ -166,7 +166,7 @@ pub fn show(
 
             ui.add_space(spacing.sm);
             ui.separator();
-            ui.label("Desktop integration").bold();
+            ui.label(RichText::new("Desktop integration").strong());
             ui.checkbox(
                 &mut settings.clipboard_prefill,
                 "Fill the URL from the clipboard",

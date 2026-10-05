@@ -120,7 +120,7 @@ impl DropZone {
                         file.path
                             .as_ref()
                             .map(|p| p.display().to_string())
-                            .or_else(|| file.name.clone())
+                            .or_else(|| (!file.name.is_empty()).then(|| file.name.clone()))
                     }),
                 dropped_uri_list(&i.raw.dropped_files),
                 !i.raw.hovered_files.is_empty(),
