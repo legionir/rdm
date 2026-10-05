@@ -25,15 +25,17 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
     egui::Window::new("Help — states, keyboard and words")
         .collapsible(false)
         .resizable(true)
-        .default_width(sizes.details_width)
-        .default_height(sizes.details_height)
+        .default_width(sizes.details_default[0])
+        .default_min_width(sizes.details_min[0])
+        .default_height(sizes.details_default[1])
+        .min_height(sizes.details_min[1])
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for (heading, lines) in ux::help_sections() {
                     components::section_title(ui, heading);
                     for line in lines {
-                        ui.label(RichText::new(&line).color(palette.text));
+                        ui.label(RichText::new(&line).color(palette.text_primary));
                     }
                     ui.add_space(spacing.md);
                 }

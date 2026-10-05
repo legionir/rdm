@@ -370,6 +370,9 @@ impl RdmGuiApp {
                 self.state.pending_confirm = None;
                 self.drop_queue_now();
             }
+            UiAction::ToggleHelp => {
+                self.state.show_help = !self.state.show_help;
+            }
             UiAction::ClearLog => self.state.log.clear(),
         }
     }
