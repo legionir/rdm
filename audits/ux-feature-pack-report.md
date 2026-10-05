@@ -32,17 +32,29 @@ worsened with every save (theme switch, setting change, download added).
 
 **Fix (in scope, no format break).**
 
-* `escape()` now escapes only what `parse()` understands: `\n`, `\t`, `"`.
-  A stray backslash — the normal case for a Windows path — is written verbatim.
-* `parse()` keeps its tolerance for the old, over-escaped form, so files written by earlier
-  versions still load (a `\\` sequence is read back as a single `\`).
-* `download_dir = D:\iso\files` and `--data-dir` files stay byte-identical through any number
-  of save/load cycles.
+* `escape()` now escapes only what `parse()` understands: `\n`, `\t`, `"`. A stray
+  backslash — the normal case for a Windows path — is written verbatim, so `C:\download\rdm` is
+  stored and read back unchanged. **The doubling stops.**
+* `download_dir = D:\iso\files` and `--data-dir` values stay byte-identical through any
+  number of save/load cycles.
+* **Values already doubled by the old version are preserved, not rewritten.** In a saved
+  value the pair `\\` cannot be told apart from a legitimate UNC share (`\\server\share`) or
+  an extended-length path (`\\?\C:\…`); an automatic repair could corrupt those, and
+  rewriting a user's saved data without asking is not acceptable. Windows treats duplicate
+  separators as one, so such a path still resolves to the same folder. What changed is that
+  the window now *says* it: a hint under *Download directory* and *Metadata directory* in
+  Settings — “Doubled separators — written by an older rdm build. Windows normally treats
+  them as one; pick the folder again to clean it up.”
+  (`ux::DOUBLED_SEPARATOR_HINT` + `ux::doubled_separator_hint`, unit-tested; it never fires
+  for a UNC share or an extended-length path).
 
-**Evidence.** `rdm-gui/src/settings.rs` tests: a five-round round-trip of `C:\download\rdm`
-asserting the value is unchanged and that no doubled backslash appears after any round
-(`settings.rs::windows_paths_survive_repeated_saves`), plus the loader case for an
-over-escaped legacy file. CI job `build-gui-windows` → `Test GUI crate` (run IDs in
+**Evidence.** `rdm-gui/src/settings.rs`:
+`windows_paths_survive_any_number_of_round_trips` (five save/load cycles of
+`C:\download\rdm`; the value is unchanged and no doubled pair appears after any round) and
+`a_legacy_doubled_path_is_preserved_and_no_longer_grows` (a file written by the buggy
+version: the value is kept verbatim, a save does not double it again, and the Settings hint
+fires). `rdm-gui/src/ux.rs::the_legacy_separator_hint_fires_for_corrupted_values_and_never_for_unc`
+pins the hint rule. CI job `build-gui-windows` → `Test GUI crate` (run IDs in
 `audits/evidence/ux-feature-pack-ci-runs.json`).
 
 **Related fix found while verifying A.** `--data-dir DIR` was overwritten by the value saved
@@ -155,7 +167,7 @@ starts `rdm-gui.exe` from Explorer with no console present and verifies no windo
 
 | Claim | Evidence | Status |
 | --- | --- | --- |
-| Bug A fixed (no doubling, legacy files still load) | `settings.rs` round-trip tests; CI `Test GUI crate` | ✅ proven |
+| Bug A fixed (no doubling on any save/load; a legacy doubled value is preserved, explained in Settings, and never grows further) | `settings.rs` round-trip + legacy tests, `ux.rs` hint test; CI `Test GUI crate` | ✅ proven |
 | Bug B fixed (no console child) | `CREATE_NO_WINDOW` on the only spawn; grep shows no other process spawn in `rdm-gui` | ✅ proven in code |
 | Icon pipeline (exe, window, tray) | `assets/generate_icon.py` re-runs deterministically; `icon.rs` tests; `build.rs` embeds the `.ico` on Windows | ✅ proven |
 | All GUI unit tests pass (75 `#[test]`, was 51) | CI run 37369744644 (`b478f4b`): job `build-gui-windows` → **Build GUI binary ✓ · Test GUI crate ✓ · Stage GUI binary ✓ · Upload GUI artifact ✓** (the exe, icon embedded, was built and uploaded) | ✅ **proven** |
@@ -246,3 +258,10 @@ Priority:    P1 (the features are user-visible; a wrong anchor or a dead tray wo
   pre-existing and left alone for the same reason.
 * Not done here (out of this increment's request): keyboard shortcut to open the drop target,
   a settings control for the tray icon itself, and moving the drop target by dragging.
+* **Correction (2026-10-06).** An earlier draft of §2 and the commit message of `472414b`
+  claimed the loader decoded a doubled backslash back into a single one for files from the
+  buggy version. The code never did that: it preserves the stored value. The false sentence
+  is removed, the real behaviour is documented above and pinned by
+  `settings.rs::a_legacy_doubled_path_is_preserved_and_no_longer_grows`, and the user-facing
+  consequence (a hint in Settings) was added in `cf7c211`+ instead of leaving a silent
+  surprise.

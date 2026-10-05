@@ -420,6 +420,37 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn a_legacy_doubled_path_is_preserved_and_no_longer_grows() {
+        // A file written by the version with the doubled-backslash defect: every
+        // separator was written twice. It is NOT repaired automatically — in a
+        // saved value a doubled pair cannot be told apart from a UNC share
+        // (`@@BSB@@server\share`) or an extended-length path, and rewriting
+        // either would break it. What the fix guarantees is that the value stops
+        // growing, and that Settings now explains it (see `ux::doubled_separator_hint`).
+        let stored = r#"download_dir = "C:\\download\\rdm""#;
+        let value = r"C:\\download\\rdm";
+        let parsed = AppSettings::parse(stored);
+        assert_eq!(parsed.download_dir, value, "the stored value is kept verbatim");
+
+        // Round-tripping it through the store changes nothing: 2 backslashes
+        // stay 2 backslashes, never 4.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(SETTINGS_FILE), stored).unwrap();
+        let mut store = SettingsStore::new(dir.path(), false);
+        store.save().unwrap();
+        let written = std::fs::read_to_string(dir.path().join(SETTINGS_FILE)).unwrap();
+        let reloaded = AppSettings::parse(&written);
+        assert_eq!(reloaded.download_dir, value, "the value does not grow on save");
+        let four = "\\".repeat(4);
+        assert!(!written.contains(&four), "no second doubling:\n{written}");
+
+        // And the sidebar tells the user what this is, instead of leaving them
+        // thinking the defect is still there.
+        assert!(crate::ux::doubled_separator_hint(&reloaded.download_dir).is_some());
+    }
+
     #[test]
     fn form_defaults_come_from_the_settings() {
         let mut settings = AppSettings::default();

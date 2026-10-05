@@ -433,6 +433,30 @@ pub fn drop_accepted(url: &str) -> String {
     format!("Link accepted — the New download form opened with {url}")
 }
 
+/// Hint shown under a path field whose value still carries the doubled
+/// separators written by rdm versions before the Bug-A fix.
+///
+/// The defect could not be repaired automatically: in a saved value a `\\`
+/// pair is indistinguishable from a legitimate UNC share (`\\server\share`)
+/// or an extended-length path (`\\?\C:\…`), and rewriting either would break
+/// it. So the value is preserved, and the user is told what it is and how to
+/// clean it — silently rewriting user data is never the answer.
+pub const DOUBLED_SEPARATOR_HINT: &str =
+    "Doubled separators — written by an older rdm build. Windows normally treats them as one; pick the folder again to clean it up.";
+
+/// Does `value` look like a path carrying the old doubled separators?
+///
+/// Only a pair that starts *after* the first two characters counts, so a UNC
+/// share (`\\server\share`) and an extended-length path (`\\?\C:\…`) are
+/// never flagged. Returns the hint to render, or `None` for a clean value.
+pub fn doubled_separator_hint(value: &str) -> Option<&'static str> {
+    // `\\` is a wrong pair only when it is not the UNC/extended-length prefix.
+    let flagged = value
+        .match_indices("\\\\")
+        .any(|(index, _)| index >= 2);
+    flagged.then_some(DOUBLED_SEPARATOR_HINT)
+}
+
 /// Tip shown in the New download dialog: where the filename comes from.
 pub const ADD_TIP: &str = "Tip: choose a folder in “Output” to keep the server-provided filename.";
 
@@ -525,6 +549,7 @@ mod tests {
         for state in ALL_STATES {
             copy.push(restart_tooltip(state).to_string());
         }
+        copy.push(DOUBLED_SEPARATOR_HINT.to_string());
         copy.push(legend_tooltip());
         copy.push(resume_all_outcome(3, 2));
         copy.push(resume_all_outcome(0, 2));
@@ -584,6 +609,34 @@ mod tests {
         let nothing = resume_all_outcome(0, 1);
         assert!(nothing.starts_with("Nothing to continue"), "{nothing}");
         assert!(nothing.contains("1 failed download(s)"));
+    }
+
+    #[test]
+    fn the_legacy_separator_hint_fires_for_corrupted_values_and_never_for_unc() {
+        // Bug A legacy values: the hint explains them instead of leaving the
+        // user thinking the defect is still there.
+        assert!(doubled_separator_hint(r"C:\\download\\rdm").is_some());
+        assert!(doubled_separator_hint(r"C:\\download").is_some());
+        assert!(doubled_separator_hint(r"\\\\server\\share").is_some());
+        assert!(doubled_separator_hint(r"\\?\\C:\\very\\long").is_some());
+        // Clean values, UNC shares and extended-length paths are not flagged.
+        for clean in [
+            r"C:\download\rdm",
+            "",
+            "relative/path",
+            r"\\server\share",
+            r"\\?\C:\very\long",
+            "/home/user/downloads",
+        ] {
+            assert!(
+                doubled_separator_hint(clean).is_none(),
+                "{clean:?} must not be flagged"
+            );
+        }
+        // The hint names the situation and the fix, per the copy rules.
+        let hint = doubled_separator_hint(r"C:\\x").unwrap();
+        assert!(hint.contains("separators"));
+        assert!(hint.contains("pick the folder again"));
     }
 
     #[test]

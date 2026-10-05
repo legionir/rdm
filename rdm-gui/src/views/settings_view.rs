@@ -7,6 +7,7 @@ use crate::settings::AppSettings;
 use crate::state::{GuiState, UiAction};
 use crate::theme::{self, components, Sizes, Spacing};
 use crate::util;
+use crate::ux;
 
 pub fn show(
     ui: &mut Ui,
@@ -70,6 +71,9 @@ pub fn show(
                     }
                 }
             });
+            if let Some(hint) = ux::doubled_separator_hint(&settings.download_dir) {
+                components::hint(ui, &palette, hint);
+            }
 
             ui.add_space(spacing.md);
             ui.label("Connections");
@@ -135,6 +139,9 @@ pub fn show(
                     }
                 }
             });
+            if let Some(hint) = ux::doubled_separator_hint(&state.data_dir_input) {
+                components::hint(ui, &palette, hint);
+            }
             if ui
                 .button("Apply data directory")
                 .on_hover_text("Reopens metadata.db from another folder")
