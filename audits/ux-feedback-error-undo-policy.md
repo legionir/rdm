@@ -19,7 +19,9 @@
 4. **The UI never offers an action the engine will refuse.** Affordances match the verified
    behaviour of the bridge (`backend.rs`) — a disabled button explains the order of operations
    instead of failing after the click.
-5. **Hover is help.** Every state, every icon and every counter has a one-line explanation.
+5. **Hover is help — but not only hover.** Every state, every icon and every counter has a
+   one-line explanation, and the same content is reachable without hovering through the in-app
+   help (`F1` / ⓘ: states, keyboard map, vocabulary).
 
 ## 2. Interaction contract (action → feedback → recovery)
 
@@ -32,7 +34,7 @@
 | Restart | row ⟲ → dialog | chunks wiped, re-download from the beginning | dialog: *“discards the progress … overwrites the file at the output path. Cannot be undone.”* | none (by nature) → hence the confirmation |
 | Remove | row 🗑 → dialog | list entry removed, partial data discarded | dialog names the download, the consequence and the checkbox for the file | none → the file is only deleted when explicitly ticked |
 | Remove completed | *Remove completed…* → dialog | bulk removal | dialog names the **count**; outcome `Removed N completed download(s) from the list.` / *Nothing to remove — no completed download in the list.* | none → confirmation, and the file checkbox defaults to the saved setting |
-| Drop (queue) | queue ✕, *Drop all*, toolbar chip | queued item removed before it starts | `Dropped <url> from the queue.` / *Nothing to drop — the queue is empty.* | re-add the download; nothing was downloaded yet |
+| Drop (queue) | queue ✕, *Drop all*, toolbar chip | queued item removed before it starts; *Drop all* asks when ≥ 5 are queued (`DROP_ALL_CONFIRM_THRESHOLD`) | `Dropped <url> from the queue.` / *Nothing to drop — the queue is empty.* | re-add the download; nothing was downloaded yet |
 | Open folder | row 📂, details | OS file manager opens the output directory | `opened <dir>` or a clear error (`cannot open folder: …`) | — |
 | Apply data directory | Settings | re-opens `metadata.db` from another folder | `using metadata in <dir>` | the previous directory is untouched on disk |
 
@@ -50,14 +52,16 @@ label, whether the file checkbox applies):
 | `RemoveOne` | Remove download | removes it from the list, discards the partial data, ticking the box also deletes the finished file, *cannot be undone* | `Remove` / `Keep` | yes |
 | `RemoveCompleted` | Remove completed downloads | same for **N** completed downloads, names the count, *cannot be undone* | `Remove` / `Keep` | yes |
 | `Restart` | Restart from scratch | discards the progress, downloads from the beginning, overwrites the file, *cannot be undone* | `Restart` / `Keep the progress` | no (nothing is deleted) |
+| `DropAll` | Drop all queued downloads | drops **N** queued downloads before they start, states that no partial data exists, *cannot be undone* | `Drop them` / `Keep them` | no |
 
-Rules applied to all three: the destructive button is coloured `danger`, the consequence is shown
+Rules applied to all of them: the destructive button is coloured `danger`, the consequence is shown
 as a `warning` banner, the safe option is named after what it keeps, `Esc` closes the dialog
 (the safe path, added in the UI increment), and the download is identified by `dl-… (filename)` so
 a mis-click on the wrong row is visible before confirming.
 
 **Settings switch.** `confirm_remove` (Settings → Application, label *Confirm destructive
-actions*) governs all three dialogs. Default **on**. Switching it off makes the same actions act
+actions*) governs the dialogs (all except the bulk queue drop, which is governed by the queue
+length — it discards nothing that was fetched). Default **on**. Switching it off makes the same actions act
 immediately — the consequences are then reported as the action's status message. The TOML key is
 unchanged (`settings.toml` stays compatible).
 
@@ -82,8 +86,8 @@ tone, the text carries the meaning).
 | --- | --- | --- |
 | Stopping a transfer | *Pause* / *Cancel* keep the partial data; *Resume* continues | `backend.rs::pause/cancel/resume`, engine chunk persistence |
 | Closing the window mid-transfer | owned transfers are paused before exit (5 s grace, then `Interrupted`) | `app.rs::on_exit`, `backend.rs::shutdown` |
-| Deleting data by accident | prevented: remove/restart ask first; the file is deleted only with an explicit checkbox | `ux.rs` policy + dialogs |
-| Losing a queued download | nothing was downloaded; re-add it | `backend.rs::clear_queue` |
+| Deleting data by accident | prevented: remove/restart ask first; the file is deleted only with an explicit checkbox; emptying a long queue asks too | `ux.rs` policy + dialogs |
+| Losing a queued download | nothing was downloaded; re-add it (above the threshold the dialog warns first) | `backend.rs::clear_queue`, `ux::drop_all_confirm` |
 
 | Not recoverable (and therefore confirmed) | Why |
 | --- | --- |
@@ -96,9 +100,11 @@ tone, the text carries the meaning).
 1. **No global “Undo” toast.** An undo stack for file deletion would require keeping detached
    files; the cheaper and more honest protection is the confirmation plus an explicit file
    checkbox (see `RISK-UX-002` for the residual risk).
-2. **Queue drops are not confirmed.** Nothing has been downloaded yet and the queue item can be
-   recreated by pasting the URL again; a dialog on every ✕ would punish the common case. The tooltip
-   says so explicitly. If user testing shows regret here, raising this to a confirmation is a
-   one-line policy change (`DESTRUCTIVE`, `Confirm::None` → `Confirm::DropOne`).
+2. **Queue drops are confirmed only when the queue is long.** Nothing has been downloaded yet and
+   the queue item can be recreated by pasting the URL again, so a dialog on every ✕ would punish
+   the common case; but emptying *five or more* queued downloads in one click is an easy mistake
+   with a real cost, so that case asks (`ux::drop_all_confirm`). The threshold is one constant;
+   a user study can move it. If regret shows up on single drops, raising them to a confirmation is
+   a one-line policy change (`DESTRUCTIVE`, `Confirm::None` → `Confirm::DropOne`).
 3. **Confirmations can be switched off** for expert users; the outcome message then carries the
    consequence.

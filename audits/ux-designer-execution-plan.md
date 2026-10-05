@@ -85,6 +85,26 @@
 | 5.2 | Handoff + Execution Result (`audits/ux-designer-handoff.md`) for UI/Product and the Design Manager/PM | 🟢 |
 | 5.3 | Consolidate findings, risks, recommendations, DoD | 🟢 |
 
+## PH-6 — Closure of the open items (follow-up increment) `[🟢]`
+Requested after review: “close the items that can be closed”. Items that need
+outside input (user testing, product decisions) stay open **by design** and keep
+their escalations.
+
+| # | Item | Type | Status |
+| --- | --- | --- | --- |
+| 6.1 | Q2 (flows §7): a long queue dropped with one click | Open product/UX question, closeable in UX scope | 🟢 asks when ≥ 5 queued downloads (`ux::drop_all_confirm`, `Confirm::DropAll`) |
+| 6.2 | RISK-UX-003: the state legend existed only on hover | Risk, closeable | 🟢 in-app help window (`F1` / ⓘ) with states, keyboard map and vocabulary; the empty list also names the first step and `F1` in text |
+| 6.3 | Q4/§4: `Resume all` skipped failed downloads silently | Feedback gap | 🟢 the outcome message names them and points at ⟲ Restart (`ux::resume_all_outcome`) |
+| 6.4 | GUI copy quoted CLI syntax (`Remove ▸ purge`) and the remove outcome hid a silent no-op | Consistency/honesty defect | 🟢 GUI copy rewritten; `remove` reports “the file was already gone” when there was nothing to delete |
+| 6.5 | CLI failed summary pointed at `rdm resume`, which refuses a failed download | Recovery-path defect (same class as FIND-UX-003) | 🟢 the summary names the continuation command that works |
+| 6.6 | `TEST_INVENTORY.md` GUI section and the copy rules were not updated for the closure | Documentation | 🟢 updated (51 GUI tests, ux.rs: 12) |
+| 6.7 | Q1 (make `Failed` resumable in the engine?) and Q3 (undo for file deletion?) | **Require product/engineering decisions** | 🔴 open, escalated as `UX-ESC-004` (owner: Product + engineering) |
+| 6.8 | User testing (PH-3.4) | **Requires participants/display** | 🔴 open by design, `UX-ESC-001` |
+
+Closure verification: CI run 37357552644 on `15cf0ed` (build ✓, `Test GUI crate` ✓ with the
+12 UX policy tests, CLI regression ✓) + `audits/ux-terminology-check.py` PASS +
+`audits/ui-contrast-check.py` PASS (21 Rust files incl. the new `help_overlay.rs`).
+
 ## Discovered work (added with a reason, never silently)
 
 | # | Discovery | Reason it was added | Status |
@@ -95,6 +115,10 @@
 | D-4 | 🗑 was offered for running downloads although the backend rejects it ("still running; cancel it first") | PH-0.3 dead-end affordance → PH-2.5 | 🟢 |
 | D-5 | Status bar used database jargon ("record(s)", "done", "waiting") inconsistent with the state names used everywhere else | PH-0.1 terminology inventory → PH-2.6 | 🟢 |
 | D-6 | No user research/analytics artifacts exist in the repository, while the role requires *User Test Evidence* | PH-0 provenance check; cannot be fabricated → recorded as MISSING and escalated (`UX-ESC-001`); verification uses documented substitutes | 🟢 (recorded) |
+| D-7 | The GUI carried CLI-only syntax in its own copy (`Remove ▸ purge`) and `remove` reported success even when there was no file to delete | Found while closing the open items; a user cannot execute CLI syntax from the window, and an unreported no-op reads as a deletion | 🟢 PH-6.4 |
+| D-8 | The CLI's failed summary told users to run `rdm resume <ID>`, which the same CLI refuses for a failed download | Same defect class as FIND-UX-003 (dead-end recovery path), found by re-reading the summary against `run_resume` | 🟢 PH-6.5 |
+| D-9 | The two CI-diagnostic steps are load-bearing: the closure increment's three compile issues (module wiring, token names, egui builder API) were found **only** through check-run annotations | Confirms `UX-ESC-003`: without the steps, GUI regressions in this environment are undiagnosable | 🟢 (recorded) |
+| D-10 | The bulk `resume_all` scope fix (FIND-UX-004) changes behaviour documented in the README | Requirement-owner decision → escalated, not decided here | 🟢 (recorded, `UX-ESC-002`) |
 
 ## Verification results (final)
 

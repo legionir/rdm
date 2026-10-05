@@ -22,7 +22,7 @@
 - src/cli/commands.rs: 7 new (parse_checksum ×3, opts_parse ×3, connections_range)
 - tests/cli_real.rs: 2 new (help/version, bad-url graceful)
 
-## GUI tests (rdm-gui/src/) — 48 tests
+## GUI tests (rdm-gui/src/) — 51 tests
 - backend.rs: 10
 - logging.rs: 2
 - settings.rs: 4
@@ -32,8 +32,9 @@
 - theme/mod.rs: 4 (design guards: no colour literals in views, every view uses `theme::`, sidebar cap, theme reversibility)
 - theme/components.rs: 2 (row-background precedence, banner severities)
 - views/download_list.rs: 4 (responsive column fitting, optional-column drop order, width invariant)
-- ux.rs: 9 (UX policy: confirmation scope and consequence copy, safe-option naming, bulk
-  count/zero-case copy, state legend completeness, Failed/Completed never offer Resume,
+- ux.rs: 12 (UX policy: confirmation scope and consequence copy, safe-option naming, bulk
+  count/zero-case copy, drop-all threshold, resume-all outcome naming failed downloads,
+  state legend completeness, help sections, Failed/Completed never offer Resume,
   remove-while-running explanation, jargon-free copy, glossary synonyms)
 
 Design layer: `rdm-gui/src/theme/` is the single source of truth for colour,

@@ -8,10 +8,12 @@
   [`ux-usability-evaluation.md`](ux-usability-evaluation.md)
 - **Required actions:** review/approve against the usability criteria, record the state, then
   answer the open questions in §7 of the flows document
-- **Branch / commit:** `arena/01a10cef-rdm` @ `47253af`; final CI run
-  [37350848407](https://github.com/legionir/rdm/actions/runs/37350848407) — `Build GUI binary` ✓,
-  `Test GUI crate` ✓, `test-windows` (CLI regression) ✓ (first code-green run of this increment:
-  [37350073234](https://github.com/legionir/rdm/actions/runs/37350073234) @ `3eb2def`)
+- **Branch / commit:** `arena/01a10cef-rdm` @ `15cf0ed`; final CI run
+  [37357552644](https://github.com/legionir/rdm/actions/runs/37357552644) — `Build GUI binary` ✓,
+  `Test GUI crate` ✓, `test-windows` (CLI regression) ✓. Increment history:
+  [`37350073234`](https://github.com/legionir/rdm/actions/runs/37350073234) @ `3eb2def` (first
+  code-green run) → [`37350848407`](https://github.com/legionir/rdm/actions/runs/37350848407) @
+  `47253af` (docs) → **closure increment** `4de6f1c`/`df5c77f`/`15cf0ed` → run above
 - **Pull request:** [#8](https://github.com/legionir/rdm/pull/8) (same branch; this increment is
   part of it)
 
@@ -122,6 +124,39 @@ ChangeManifest:
       RequirementIDs: [] (enabler for verification)   TestStatus: PASS (run 37350073234)   Evidence: [EVIDENCE-UX-005]
 ```
 
+  - Path: rdm-gui/src/views/help_overlay.rs
+      Action: CREATED   Scope: UX (in-app help)   Status: COMPLETED
+      Reason: states + keyboard map + vocabulary reachable without hovering (closes RISK-UX-003); content comes from ux::help_sections so the unit tests cover it
+      RequirementIDs: [REQ-UX-005]   TestStatus: PASS (CI)   Evidence: [EVIDENCE-UX-007]
+  - Path: rdm-gui/src/ux.rs (closure delta)
+      Action: MODIFIED  Scope: UX policy   Status: COMPLETED
+      Reason: Confirm::DropAll + DROP_ALL_CONFIRM_THRESHOLD/drop_all_confirm, resume_all_outcome, SHORTCUTS (F1), help_sections; 9 → 12 policy tests
+      RequirementIDs: [REQ-UX-005]   TestStatus: PASS (CI)   Evidence: [EVIDENCE-UX-007]
+  - Path: rdm-gui/src/state.rs (closure delta)
+      Action: MODIFIED  Scope: interaction state   Status: COMPLETED
+      Reason: PendingConfirm::DropQueue, UiAction::AskDropQueue, UiAction::ToggleHelp, GuiState::show_help
+      RequirementIDs: [REQ-UX-005]   TestStatus: PASS (CI)   Evidence: [EVIDENCE-UX-007]
+  - Path: rdm-gui/src/app.rs (closure delta)
+      Action: MODIFIED  Scope: interaction loop   Status: COMPLETED
+      Reason: AskDropQueue threshold handling + drop_queue_now; Resume-all outcome names failed downloads; help overlay rendered and toggled; Escape closes the help first
+      RequirementIDs: [REQ-UX-005]   TestStatus: PASS (CI)   Evidence: [EVIDENCE-UX-007]
+  - Path: rdm-gui/src/views/toolbar.rs, queue_sidebar.rs, download_list.rs, views/mod.rs (closure delta)
+      Action: MODIFIED  Scope: entry points/copy   Status: COMPLETED
+      Reason: ⓘ Help button + F1 hint; AskDropQueue from the queue sidebar and the chip; the empty list names the first step and F1 in text; help view registered
+      RequirementIDs: [REQ-UX-005]   TestStatus: PASS (CI)   Evidence: [EVIDENCE-UX-007]
+  - Path: rdm-gui/src/backend.rs (closure delta)
+      Action: MODIFIED  Scope: GUI copy/honesty   Status: COMPLETED
+      Reason: cancel/remove messages no longer quote CLI syntax; remove reports “the file was already gone” when the purge deleted nothing (an unreported no-op read as a deletion)
+      RequirementIDs: [REQ-UX-005]   TestStatus: PASS (CI)   Evidence: [EVIDENCE-UX-007]
+  - Path: src/cli/commands.rs (closure delta)
+      Action: MODIFIED  Scope: CLI recovery copy   Status: COMPLETED
+      Reason: the failed summary no longer points at `rdm resume` (refused for a failed download) and names the working continuation command
+      RequirementIDs: [REQ-UX-005]   TestStatus: PASS (CI)   Evidence: [EVIDENCE-UX-007]
+  - Path: README.md, TEST_INVENTORY.md, audits/*.md (closure delta)
+      Action: MODIFIED  Scope: documentation   Status: COMPLETED
+      Reason: queue threshold, help window, resume-all scope documented; GUI test inventory 48 → 51 (ux.rs: 12); plan/flows/policy/evaluation updated with the closure and the remaining open items
+      RequirementIDs: [REQ-UX-005]   TestStatus: NOT_APPLICABLE (prose)   Evidence: [EVIDENCE-UX-007]
+
 No files were deleted or renamed. One stale enum variant (`UiAction::RemoveCompleted`) was
 **removed** from `state.rs` (replaced by `AskRemoveCompleted` + `RemoveCompletedConfirmed`) — listed
 here so it is not mistaken for hidden work; it is not a file deletion.
@@ -156,6 +191,10 @@ here so it is not mistaken for hidden work; it is not a file deletion.
 | TEST-UX-013 | Regression: CLI/engine crate (`cargo test --all-targets`) and the pre-existing GUI tests (39) | CI | PASS | EVIDENCE-UX-005 |
 | TEST-UX-014 | Baseline: terminology violations before the change (15) | Static audit | PASS (recorded) | EVIDENCE-UX-004 |
 | TEST-UX-015 | User testing with participants | — | **NOT_RUN — NOT_APPLICABLE in this environment** | `UX-ESC-001` |
+| TEST-UX-016 | `ux::a_short_queue_is_dropped_at_once_a_long_one_asks` (drop threshold + copy) | Rust unit (CI) | PASS | EVIDENCE-UX-007 |
+| TEST-UX-017 | `ux::resume_all_names_the_failed_downloads_it_cannot_continue` | Rust unit (CI) | PASS | EVIDENCE-UX-007 |
+| TEST-UX-018 | `ux::help_covers_states_shortcuts_and_vocabulary` + `help_sections()` content | Rust unit (CI) | PASS | EVIDENCE-UX-007 |
+| TEST-UX-019 | Closure regression: build + GUI tests + CLI tests after the closure changes | CI | PASS | EVIDENCE-UX-007 |
 
 No test result is claimed without execution; TEST-UX-015 is deliberately NOT_RUN and no usability
 metric depends on it.
@@ -169,6 +208,8 @@ metric depends on it.
 | EVIDENCE-UX-003 | Flows/IA/entry/exit/error points and the walkthrough | DOCUMENT / SECTION | `audits/ux-flows-and-ia.md` §1–§7; `audits/ux-usability-evaluation.md` §2 |
 | EVIDENCE-UX-004 | Terminology consistency (0 violations, from 15) | TEST_RESULT / FILE | `audits/evidence/ux-terminology-baseline.txt`, `audits/evidence/ux-terminology-report.txt`, `audits/ux-terminology-check.py` |
 | EVIDENCE-UX-005 | Rust compile + tests + CLI regression on the final head | TEST_RESULT / BUILD_OUTPUT | CI runs [37350073234](https://github.com/legionir/rdm/actions/runs/37350073234) (code head `3eb2def`) and [37350848407](https://github.com/legionir/rdm/actions/runs/37350848407) (docs head `47253af`) → `audits/evidence/ux-ci-run.json`, `ux-ci-jobs.json`, `ux-ci-run-final.json`, `ux-ci-jobs-final.json` |
+| EVIDENCE-UX-007 | Closure increment compiled, tested and green on the final head; static checks pass (incl. the new help view) | TEST_RESULT / BUILD_OUTPUT | CI run [37357552644](https://github.com/legionir/rdm/actions/runs/37357552644) → `audits/evidence/ux-ci-run-closure.json`, `ux-ci-jobs-closure.json`; `audits/evidence/ux-terminology-report.txt`, `audits/evidence/ui-contrast-check.txt` (regenerated, 21 Rust files) |
+| EVIDENCE-UX-008 | Three CI-only compile issues in the closure (module wiring, token names, egui builder API) were diagnosed exclusively through check-run annotations | LOG | annotations of check runs on `4de6f1c`/`df5c77f`; each fix names the failure in its commit message |
 | EVIDENCE-UX-006 | The two earlier CI failures of this increment and their causes (module not registered; a test asserting the file-consequence phrase) — traceability of the fixes | LOG | check-run annotations of runs 37348453897 and 37349440692 (recorded in the commit messages `39372c8`, `3eb2def`) |
 
 ## 6. Findings, risks, recommendations
@@ -181,8 +222,9 @@ where the engine refuses — plus the bulk-resume abort).
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | RISK-UX-001 | A user switches confirmations off (Settings) and destroys data unintentionally | Unlikely | High | Medium | default is on; the outcome message states what happened; the file checkbox is separate from the removal | UX / Product | Medium — accepted, documented |
 | RISK-UX-002 | No undo for file deletion; a confirmed mistake is unrecoverable | Possible | High | High | confirmation + explicit file checkbox; recovery inventory documented; Q3 raised for Product | Product | High — needs a product decision |
-| RISK-UX-003 | The state legend (hover-only) is invisible to users who never hover | Possible | Medium | Medium | legend also reachable via the status-bar counters and the toolbar ⓘ; empty states carry the first step in text | UI / UX | Low |
-| RISK-UX-004 | No user manual / onboarding beyond tooltips and README | Likely | Medium | Medium | in-context help everywhere; README documents every flow; manual is outside this role's scope (recorded) | Product | Medium |
+| RISK-UX-003 | ~~The state legend is hover-only~~ **Closed (PH-6.2).** | — | — | **Closed** | `F1`/ⓘ help window with states, keyboard and vocabulary; the empty list names the first step and `F1` in text; unit test asserts the content is complete | UX / UI | **Closed** |
+| RISK-UX-007 | The 5-item threshold for confirming *Drop all* may not match user expectations | Possible | Low | Low | one constant (`DROP_ALL_CONFIRM_THRESHOLD`); the dialog below the threshold is intentionally absent because nothing has been fetched; a user study can move it | UX / Design Manager | Low |
+| RISK-UX-004 | No external user manual | Possible | Low | Low | in-context help everywhere **plus** the in-app help window (F1) and the README; an external manual remains outside this role's scope | Product | Low |
 | RISK-UX-005 | The `resume_all` scope change alters documented bulk behaviour | Unlikely | Medium | Low | documented in the manifest; the CLI help and tooltip now match the engine; escalated for PM confirmation (`UX-ESC-002`) | PM | Low |
 | RISK-UX-006 | Verification of UX behaviour depends on CI (no local toolchain) | Almost certain | Medium | Medium | CI green on the final head; local static checks re-run each time | UX / PM | Medium |
 
@@ -191,7 +233,7 @@ where the engine refuses — plus the bulk-resume abort).
 | REC-UX-001 | Approve the glossary + copy rules and keep the static check in CI (add it to the test job so regressions fail the build, not only the local script) | PM / Frontend |
 | REC-UX-002 | Run the 5-participant study (T1, T3, T7 + the bulk flows) to convert the “Unknown” task-success KPI into data | Design Manager / PM |
 | REC-UX-003 | Decide Q1 (make `Failed` resumable?) and Q3 (undo for file deletion?) — both touch engine/product scope and are escalated, not decided here | Product + engineering |
-| REC-UX-004 | Surface a first-run “what the states mean” hint in the empty list (text, not hover-only) once onboarding is in scope | UX / UI |
+| REC-UX-004 | ~~First-run hint~~ **Done (PH-6.2):** the empty list names the first step and `F1` in text, and `F1` opens the full state/keyboard/vocabulary help. Remaining option: an actual first-run tour, if Product wants one. | UX / UI |
 | REC-UX-005 | When a user manual/help centre exists, link it from the App-log pane and the New download dialog | Product |
 
 ## 7. Escalations
@@ -239,6 +281,24 @@ TargetPersona: Design Manager, Product Manager (PM) — repo owner for CI
 Urgency:      P1
 ```
 
+```
+UX-ESC-004
+Trigger:      MISSING_DECISION (product/engine policy)
+Evidence:     Q1: `Failed` downloads cannot be resumed (`src/cli/commands.rs::run_resume` rejects
+              terminal states except Cancelled; `rdm-gui/src/backend.rs::resume` mirrors it), so the
+              only recovery is a full Restart — the UX layer now says so in the GUI, the CLI and the
+              help window instead of pointing at a refusal (PH-6.5). Q3: file deletion has no undo
+              (`backend.rs::remove` deletes the output file and its sidecar; RISK-UX-002).
+Impact:       Both options change product/engine behaviour (resumable failed downloads; a kept
+              detached-file copy), which is outside the UX scope to decide.
+BlockedWork:  Closing Q1/Q3 — everything UX can do without the decision is implemented (copy,
+              confirmations, truthful outcomes).
+DecisionRequired: decide whether `Failed` becomes resumable (engine change) and whether an undo
+              or a retention window for deleted files is worth its storage cost.
+TargetPersona: Product Manager (PM) with engineering
+Urgency:      P2
+```
+
 Cross-domain rule compliance: each effect was identified, current behaviour preserved where
 possible (job outcomes unchanged: destructive confirms are additive, the CI job still fails when
 builds/tests fail), documented, and escalated to the responsible persona.
@@ -247,22 +307,21 @@ builds/tests fail), documented, and escalated to the responsible persona.
 
 | Item | State |
 | --- | --- |
-| All increments complete | yes — PH-0…PH-5 all 🟢 in the execution plan |
+| All increments complete | yes — PH-0…PH-5 (main) and PH-6 (closure) 🟢; the two items that need outside input stay 🔴 **by design** (6.7 product decisions, 6.8 user testing) |
 | Change Manifest complete | yes — §2 (20 entries) |
 | Modified/created files recorded | yes — §2 (one stale enum variant removed, recorded) |
 | Tests executed | yes — CI run 37350073234 (Rust) + static audits; user testing explicitly NOT_RUN |
 | Regression checked | yes — CLI/engine crate and the 39 pre-existing GUI tests still pass |
 | Evidence recorded | yes — EVIDENCE-UX-001…006 |
-| No blocking issue | yes, apart from the two documented escalations (evidence classes / CI approval) |
+| No blocking issue | yes — the only open items are outside-input items with named owners and triggers |
 | Handoff complete | yes — this document + 4 UX artifacts |
 | Execution Result complete | yes — §10 |
 
 ## 9. Pull request
 
-PR [#8](https://github.com/legionir/rdm/pull/8) (`arena/01a10cef-rdm` → `main`) carries the UI
-increment; this UX increment is pushed to the same branch and summarised in a PR comment so the
-Design Manager and PM review both together. CI on the current head: run
-[37350848407](https://github.com/legionir/rdm/actions/runs/37350848407) — all jobs ✓.
+PR [#8](https://github.com/legionir/rdm/pull/8) (`arena/01a10cef-rdm` → `main`) carries the UI and
+UX increments; the closure increment is pushed to the same branch. CI on the current head:
+run [37357552644](https://github.com/legionir/rdm/actions/runs/37357552644) — all jobs ✓.
 
 ## 10. Execution Result
 
@@ -277,20 +336,25 @@ Verdict: The rdm interaction surface now follows an explicit, machine-checked UX
   User testing with real participants was not possible in this environment and is
   recorded as MISSING (UX-ESC-001) - no usability claim depends on it.
 State: REVIEW_PENDING   (decision owner: Design Manager / PM)
+Closure note: this Handoff was updated by the follow-up closure increment (PH-6). Items that could
+  be closed without outside input are closed and verified (Q2 drop threshold, RISK-UX-003 in-app
+  help, Q4 honest Resume-all outcome, GUI/CLI recovery copy, inventory). Q1 and Q3 remain open with
+  named owners (UX-ESC-004); user testing remains open (UX-ESC-001).
 Coverage: 12/12 changed code files compiled and covered by the CI test run (100%);
-  4 UX artifacts + 4 evidence files + 1 checker; 9 new UX policy tests (48 #[test] in
-  the GUI crate counted from source)
+  4 UX artifacts + 6 evidence files + 1 checker; 12 new UX policy tests (51 #[test] counted
+  in the GUI crate after the closure; 48 at the first code-green run)
 Coverage Manifest: audits/ux-designer-handoff.md §2 (manifest), §3 (coverage), §4 (tests)
 Decomposition: PH-0 inspection/baseline → PH-1 policy artifacts → PH-2 remediation →
   PH-3 usability evaluation → PH-4 verification (static + CI) → PH-5 handoff
-Findings: FIND-UX-001..012 (3 High: unconfirmed bulk delete incl. files; unconfirmed
-  restart; Resume offered where the engine refuses + bulk resume abort). All remediated.
-  Full list: audits/ux-usability-evaluation.md §2
+Findings: FIND-UX-001..014 (3 High: unconfirmed bulk delete incl. files; unconfirmed
+  restart; Resume offered where the engine refuses + bulk resume abort; plus two Medium
+  closure findings: CLI-only syntax in GUI copy, and the CLI's dead-end `rdm resume`
+  advice on failure). All remediated. Full list: audits/ux-usability-evaluation.md §2
 Changes: created rdm-gui/src/ux.rs + 4 UX artifacts + checker + evidence; modified 11 GUI
   files, the CLI help text, the README and (out of scope, escalated) the CI workflow;
   removed one stale UiAction variant
-Tests: TEST-UX-001..013 PASS (CI 37350073234 / 37350848407 + static audits), TEST-UX-014 baseline PASS,
-  TEST-UX-015 user testing NOT_RUN (MISSING, UX-ESC-001)
+Tests: TEST-UX-001..014 PASS (CI 37350073234 / 37350848407 + static audits), TEST-UX-016..019
+  closure PASS (CI 37357552644), TEST-UX-015 user testing NOT_RUN (MISSING, UX-ESC-001)
 Evidence: EVIDENCE-UX-001..006
 ExecutionPlan: audits/ux-designer-execution-plan.md
 Affected Locations: rdm-gui/src/{ux,app,state,backend,main}.rs, rdm-gui/src/views/*.rs,
@@ -316,7 +380,10 @@ Handoff: UI, Product (primary); Design Manager, PM (approval). Artifacts:
   audits/ux-flows-and-ia.md, ux-glossary.md, ux-feedback-error-undo-policy.md,
   ux-usability-evaluation.md, this document
 Escalation: UX-ESC-001 (missing user-test evidence, P2), UX-ESC-002 (bulk-resume scope
-  decision, P2), UX-ESC-003 (CI diagnostics step outside scope, P1)
-Next Action: review/approve on PR #8; then REC-UX-001…005 — starting with the research
-  study, which is the only way to turn the task-success KPI from Unknown into data
+  decision, P2), UX-ESC-003 (CI diagnostics step outside scope, P1 - confirmed load-bearing
+  by the closure increment: three compile issues were diagnosable only through it),
+  UX-ESC-004 (product decisions: resumable Failed downloads, undo for file deletion, P2)
+Next Action: review/approve on PR #8; decide UX-ESC-002/003/004; then REC-UX-001…005 —
+  starting with the research study, which is the only way to turn the task-success KPI
+  from Unknown into data. Nothing else remains open that UX can close on its own.
 ```

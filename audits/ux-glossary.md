@@ -29,6 +29,7 @@ happened. The glossary fixes one preferred term per concept and forbids the rest
 | **Resume** | continue a download where it stopped | Continue (as a button label), Retry | row ▶, *Resume all*, CLI `rdm resume` |
 | **Restart** | download again from the beginning (progress is discarded, the file is overwritten) | Retry, Redo, Reload | row ⟲, dialog *Restart from scratch* |
 | **Details** | the technical view of one download (state, sizes, partial data, events, JSON) | Info (as a window title), Properties | row double-click / Enter, `rdm info` |
+| **Help** | the in-app window (`F1`) that explains states, keyboard and vocabulary | documentation, manual, FAQ | toolbar ⓘ, `F1`, empty-list hint |
 
 ### State vocabulary (the same words everywhere)
 
@@ -55,6 +56,7 @@ deliberately distinguished, because the user's next action differs:
 | R6 | The same concept uses the same word in CLI help, GUI and README. | `ux-terminology-check.py` §3 |
 | R7 | Every icon-only control has a tooltip that names the action (and the CLI equivalent where useful). | UI increment (`components::icon_button`) + review |
 | R8 | Errors say what happened, what was kept, and what to do next. | §4 of the feedback/error/undo policy |
+| R9 | Every term in this glossary is explained in-app, without hovering (Help → *Words used by rdm*). | `ux::help_sections` (unit-tested) |
 
 ## 4. Documented exceptions (terms that are allowed to differ)
 
@@ -68,7 +70,7 @@ deliberately distinguished, because the user's next action differs:
 ## 5. Baseline → after
 
 The static check over CLI help, the GUI strings and the README reported **15 violations** before
-this increment and **0** after (`audits/evidence/ux-terminology-baseline.txt` vs
+this increment and **0** after (the checker also covers the in-app help window added in PH-6) (`audits/evidence/ux-terminology-baseline.txt` vs
 `audits/evidence/ux-terminology-report.txt`). The violations were not stylistic: three of them
 (record/row/job) appeared in the *same sentence* as state counters, and two (`Clear completed`,
 `Clear queue`) described a data-destroying action with a label that hid its consequence.

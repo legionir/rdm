@@ -83,6 +83,7 @@ them ends in a state that still holds the progress.
 | T7 | Clean up the list | *Remove completed…* / row 🗑 / `rdm remove <ID>` | dialog (count + file decision) → Remove | row disappears; status reports the count* | 🗑 while running is disabled with the reason* |
 | T8 | Re-download a file | row ⟲ / `rdm download --force` | dialog (progress + overwrite) → Restart | new transfer from byte 0 | output file locked by another process → engine error in status + Events |
 | T9 | Limit concurrency | toolbar chip → ☰ Queue; Settings → *Max concurrent downloads* | raise/lower limit → queued items start | queue drains; chip disappears when empty | `0` = unlimited (documented in the label tooltip) |
+| T11 | Learn the product in the app | `F1` / toolbar ⓘ / the empty-list hint | read states → keyboard → vocabulary | help closes with `Esc`/`Close` and leaves the list untouched | — (help is read-only) |
 | T10 | Diagnose a failure | status bar → **Events** / **App log** | read the machine-level messages | the exact engine error text | App log empty until something is logged (hint says so) |
 
 ## 4. Entry points, exits and error points per screen
@@ -109,13 +110,19 @@ Toolbar: [🗑 Remove completed…] → 0 completed?        → “Nothing to re
                                                           in the list.”*  (no dialog)
                                → otherwise            → [Confirm dialog: N downloads + file checkbox]
                                                       → “Removed N completed download(s) from the list.”*
-Queue:   [Drop all]         → asks nothing (nothing downloaded yet) → “Dropped N queued download(s).”*
+Queue:   [Drop all]         → < 5 queued? asks nothing (nothing downloaded yet)
+                               → “Dropped N queued download(s).”*
+                            → ≥ 5 queued (DROP_ALL_CONFIRM_THRESHOLD)?
+                               [Confirm dialog: N queued, “no partial data is lost”]
+                               → “Dropped N queued download(s).”*
 ```
 
 The three bulk actions differ deliberately: *pause/resume* are reversible and act at once;
-*remove* destroys data and therefore asks with the count in the dialog; *drop* destroys nothing and
-acts at once. Before this increment *Remove completed* acted immediately, included the file
-deletion setting, and reported “removed N record(s)”.
+*remove* destroys data and therefore asks with the count in the dialog; *drop* destroys nothing, so
+it acts at once for short queues and asks only when a long queue (≥ 5) would be emptied in one
+click — reparsing a long queue by hand is the real cost there. Before this increment *Remove
+completed* acted immediately, included the file deletion setting, and reported “removed N
+record(s)”.
 
 ## 6. Journeys (persona-free, behaviour-based)
 
@@ -138,7 +145,8 @@ deletion setting, and reported “removed N record(s)”.
 
 | # | Question | Current behaviour | Decision needed from |
 | --- | --- | --- | --- |
-| Q1 | Should `Failed` downloads be resumable instead of requiring *Restart*? | engine refuses (`resume()` rejects terminal states except `Cancelled`); the UI offers ⟲ | Product + engineering (changes an engine contract — out of UX scope; see `UX-ESC-002`) |
-| Q2 | Should *Drop all* ask when the queue is long (say > 5 items)? | no dialog (nothing downloaded yet) | Design Manager (usability testing would answer it) |
+| Q1 | Should `Failed` downloads be resumable instead of requiring *Restart*? **Open — escalated (`UX-ESC-004`).** | engine refuses (`resume()` rejects terminal states except `Cancelled`); the UI offers ⟲ and the CLI summary now points at the working command (PH-6.5) | Product + engineering (changes an engine contract — out of UX scope; see `UX-ESC-002`) |
+| Q2 | ~~Should *Drop all* ask when the queue is long?~~ **Resolved (PH-6.1):** asks at ≥ 5 queued (`ux::drop_all_confirm`); a user study can revisit the threshold, but the safe default is in place. | dialog above the threshold, immediate below it | *closed* |
 | Q3 | Is a global “undo” for file deletion worth keeping detached files? | no undo; confirmation + explicit checkbox instead | Product (cost/benefit; `RISK-UX-002`) |
-| Q4 | Should the window offer a “retry automatically when the network is back” policy? | manual Resume/Restart only | Product (roadmap) |
+| Q4 | Should the window offer a “retry automatically when the network is back” policy? | manual Resume/Restart only; the app now also *tells* the user which failed downloads need ⟲ Restart when they use *Resume all* (PH-6.3) | Product (roadmap) |
+| Q5 | Can the engine accept `resume` on a `Failed` download (making the partial data recoverable instead of requiring a restart)? | engine refuses it; UI offers ⟲ Restart | Product + engineering (`UX-ESC-002`/`UX-ESC-004`, Q1) |
