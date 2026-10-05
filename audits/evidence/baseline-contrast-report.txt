@@ -1,0 +1,32 @@
+Baseline WCAG contrast of the hardcoded GUI palette at commit f528faf.
+Threshold: WCAG 2.1 SC 1.4.3 AA for normal text = 4.5:1.
+Reproduce: python3 audits/ui-baseline-report.py
+
+Surface assumption note: before this change the row/panel fills came from
+egui's defaults, which are not inspectable from this repository (egui 0.29.1
+is not vendored and there is no network/toolchain here). The report therefore
+shows the old palette against (a) the egui default values that were assumed and
+(b) the surfaces this change defines as tokens (deterministic, verifiable).
+
+== old palette vs (a) assumed egui defaults ==
+  role (old value)                  panel      hover   selected     window selected(light)
+  success (Completed) #16A34A        5.23       2.86       2.24       3.30       2.00
+  info (Running) #2563EB             3.33       1.83       1.43       5.17       3.14
+  merging (Merging) #8B5CF6          4.07       2.23       1.74       4.23       2.57
+  warning (Queued) #D97706           5.41       2.96       2.32       3.19       1.93
+  interrupted (Interrupted) #EA580C       4.84       2.65       2.08       3.56       2.16
+  danger (Failed / errors) #DC2626       3.57       1.95       1.53       4.83       2.93
+
+  failures: 25/30 pairs below 4.5:1; worst 1.43:1 (info (Running) on selected #005C80)
+
+== old palette vs (b) surfaces defined by the new tokens ==
+  role (old value)                   dark       dark       dark      light      light      light
+  success (Completed) #16A34A        5.23       3.45       3.49       3.10       2.64       2.71
+  info (Running) #2563EB             3.33       2.20       2.23       4.87       4.14       4.24
+  merging (Merging) #8B5CF6          4.07       2.69       2.72       3.99       3.39       3.48
+  warning (Queued) #D97706           5.41       3.57       3.61       3.00       2.55       2.62
+  interrupted (Interrupted) #EA580C       4.84       3.20       3.23       3.35       2.85       2.92
+  danger (Failed / errors) #DC2626       3.57       2.36       2.38       4.55       3.87       3.97
+
+  failures: 31/36 pairs below 4.5:1; worst 2.20:1 (info (Running) on dark hover #3A3A3A)
+

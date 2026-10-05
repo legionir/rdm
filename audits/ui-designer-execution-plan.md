@@ -16,6 +16,7 @@
 | No Rust toolchain (`cargo`, `rustc` absent from `PATH` and filesystem) | EVIDENCE-001 | `cargo build` / `cargo test` cannot run locally → local Rust test results are `NOT_RUN`, never claimed as passed |
 | No network egress (`static.crates.io` → `SSL_ERROR_SYSCALL`, HTTP 000) | EVIDENCE-002 | `egui`/`eframe` (not vendored) cannot be fetched → GUI crate cannot be compiled locally |
 | GitHub CLI authenticated (`legionir`), Actions enabled; workflow `build.yml` triggers on `arena/*` pushes and runs `cargo test --release` in `rdm-gui` plus a compiler-error annotation step | EVIDENCE-003 | The Rust compile + unit tests for this change are verified **in CI**, and the run log is the evidence |
+| Actions **log blobs** are not reachable from the sandbox (network-restricted); only `api.github.com` is | EVIDENCE-008 | CI diagnostics can only be read through check-run annotations → the annotation step had to be made reliable (D-5, ESC-001) |
 
 > Because of the above, every Rust-level claim in the Review/Verification phase must cite a CI run id; static and numerical checks executed locally are clearly labelled as such.
 
@@ -59,9 +60,9 @@
 ## PH-4 — Verification `[🟢]`
 | # | Step | Status |
 | --- | --- | --- |
-| 4.1 | Static audit script (`audits/ui-contrast-check.py`): recompute every contract pair, count hardcoded values per file, assert zero color literals in views → evidence report | 🟢 |
-| 4.2 | CI: push the branch, run `Build rdm (Windows tests + GUI)` → `test-windows` + `build-gui-windows` (`cargo build --release`, `cargo test --release`) | 🟢 |
-| 4.3 | Record test results with `TEST-###`, evidence with `EVIDENCE-###`, and update the Change Manifest | 🟢 |
+| 4.1 | Static audit script (`audits/ui-contrast-check.py`): recompute every contract pair, count hardcoded values per file, assert zero color literals in views → evidence report — **PASS**, worst pair 5.01:1, 8 UI files clean (`audits/evidence/ui-contrast-check.txt`) | 🟢 |
+| 4.2 | CI: push the branch, run `Build rdm (Windows tests + GUI)` → `test-windows` + `build-gui-windows` (`cargo build --release`, `cargo test --release`) — **PASS**, run [37345251786](https://github.com/legionir/rdm/actions/runs/37345251786); a pre-fix run had surfaced 14 compile errors that were all resolved (EVIDENCE-008) | 🟢 |
+| 4.3 | Record test results with `TEST-###`, evidence with `EVIDENCE-###`, and update the Change Manifest — `audits/ui-designer-handoff.md` §2/§4/§5 | 🟢 |
 
 ## PH-5 — Review & handoff `[🟢]`
 | # | Step | Status |
@@ -78,6 +79,18 @@
 | D-2 | No Rust toolchain / network in the sandbox | Verification must move to CI; recorded as a constraint + risk (`RISK-004`) | 🟢 |
 | D-3 | As-is palette fails WCAG AA badly (worst 1.43:1) | Not visible from the requirements; discovered by measurement (PH-0.3) and drives the palette redesign | 🟢 |
 | D-4 | No keyboard path to open details / select rows | Discovered while mapping states & semantics (PH-3); added as additive, non-breaking interaction design | 🟢 |
+| D-5 | The CI step that surfaces compiler errors aborted before emitting its annotation (`set -e -o pipefail` + `grep` with no match), and Actions log blobs are unreachable from the sandbox | Without it no GUI build diagnostic (hence no build evidence) could be obtained; minimal behaviour-preserving fix applied **outside the UI scope** and escalated as ESC-001 (approval required) | 🟢 |
+
+## Verification results (final)
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Contrast contract, both themes | PASS — worst text pair 5.01:1, focus ring ≥ 5.28:1 | `audits/evidence/ui-contrast-check.txt` |
+| Token discipline (no colour literals in 8 UI files) | PASS | same file, §3 |
+| Rust compile (GUI crate) | PASS | CI run 37345251786, job `build-gui-windows` |
+| Rust tests (GUI crate, 39 tests incl. 20 new) | PASS | CI run 37345251786, step `Test GUI crate` |
+| Regression (CLI/engine crate) | PASS | CI run 37345251786, job `test-windows` |
+| Baseline evidence (pre-change) | recorded | `audits/evidence/baseline-*.txt` |
 
 ## Rule compliance notes
 

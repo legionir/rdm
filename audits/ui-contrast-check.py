@@ -132,6 +132,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".", help="repository root")
     ap.add_argument("--out", default="", help="write the report to this file too")
+    ap.add_argument("--markdown", action="store_true",
+                    help="print the token tables as markdown (design spec source)")
     args = ap.parse_args()
 
     root = Path(args.root).resolve()
@@ -148,11 +150,43 @@ def main() -> int:
         lines.append(text)
         print(text)
 
+    def emit(text: str = "") -> None:
+        """Print without adding to the report body (markdown tables)."""
+        print(text)
+
     palettes = {
         "dark": palette_of(tokens_src, "dark_palette"),
         "light": palette_of(tokens_src, "light_palette"),
     }
     surfaces, contract = contract_of(contrast_src)
+
+    if args.markdown:
+        emit("### Palette tokens (generated from `rdm-gui/src/theme/tokens.rs`)")
+        emit("")
+        emit("| Role | Dark | Light | Worst pair (both themes) |")
+        emit("| --- | --- | --- | --- |")
+        for role in [r for r, _, _ in contract] + ["border_subtle", "zebra"]:
+            d = palettes["dark"].get(role)
+            l = palettes["light"].get(role)
+            if d is None or l is None:
+                continue
+            worst = min(
+                (contrast(palettes[mode][role], palettes[mode][surf]), mode, surf)
+                for mode in ("dark", "light")
+                for surf in (surfaces if role not in ("border_subtle", "zebra") else surfaces)
+            )
+            ratio, mode, surf = worst
+            note = "decorative (exempt)" if role in ("border_subtle", "zebra") else f"{ratio:.2f}:1 on {mode}/{surf}"
+            emit(f"| `{role}` | `{hexof(d)}` | `{hexof(l)}` | {note} |")
+        emit("")
+        emit("### Surfaces")
+        emit("")
+        emit("| Surface | Dark | Light |")
+        emit("| --- | --- | --- |")
+        for surf in surfaces:
+            emit(f"| `{surf}` | `{hexof(palettes['dark'][surf])}` | `{hexof(palettes['light'][surf])}` |")
+        emit("")
+        return 0
 
     say("rdm — UI design-token verification (static)")
     say(f"source: {tokens_path.relative_to(root)}")
