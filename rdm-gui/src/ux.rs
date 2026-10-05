@@ -153,7 +153,7 @@ impl fmt::Display for BulkAction {
             BulkAction::PauseAll => "Pause all",
             BulkAction::ResumeAll => "Resume all",
             BulkAction::RemoveCompleted => "Remove completed…",
-            BulkAction::DropQueue => "Drop all queued downloads",
+            BulkAction::DropQueue => "Drop all",
         })
     }
 }

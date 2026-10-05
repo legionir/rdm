@@ -28,7 +28,6 @@ pub enum UiAction {
     Refresh,
     PauseAll,
     ResumeAll,
-    RemoveCompleted,
     CopyToClipboard(String),
     /// Drop one queued download (nothing has been downloaded yet).
     DropQueued(u64),
