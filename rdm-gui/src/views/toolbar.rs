@@ -1,9 +1,15 @@
 //! Top toolbar: add, bulk controls, search, state filter and the sidebar
 //! toggles for Queue and Settings.
+//!
+//! Layout rules (see the design spec):
+//! * row 1 carries the actions; the sidebar toggles stay pinned right,
+//! * row 2 carries search + filters; on [`LayoutMode::Compact`] windows the
+//!   hint text is dropped so the row never wraps.
 
-use egui::{Align, Color32, Layout, RichText, Ui};
+use egui::{Align, Layout, RichText, Ui};
 
 use crate::state::{GuiState, UiAction, ALL_STATES};
+use crate::theme::{self, components, Breakpoints, LayoutMode, Sizes, Spacing};
 
 pub fn show(
     ui: &mut Ui,
@@ -12,10 +18,13 @@ pub fn show(
     queued: usize,
 ) -> Vec<UiAction> {
     let mut actions = Vec::new();
+    let palette = theme::palette_of(ui);
+    let sizes = Sizes::default();
+    let spacing = Spacing::default();
+    let mode = Breakpoints::default().mode(ui.available_width());
 
     ui.horizontal_wrapped(|ui| {
-        if ui
-            .button(RichText::new("➕  New download").strong())
+        if components::primary_button(ui, "➕  New download")
             .on_hover_text("rdm download <URL> …")
             .clicked()
         {
@@ -44,18 +53,22 @@ pub fn show(
             actions.push(UiAction::RemoveCompleted);
         }
         ui.separator();
-        if ui.button("🔄 Refresh").clicked() {
+        if ui
+            .button("🔄 Refresh")
+            .on_hover_text("Re-read the metadata database (F5)")
+            .clicked()
+        {
             actions.push(UiAction::Refresh);
         }
         if active_jobs > 0 {
-            ui.add(egui::Spinner::new().size(14.0));
+            ui.add(egui::Spinner::new().size(spacing.spinner));
             ui.label(format!("{active_jobs} running here"));
         }
         if queued > 0 {
             ui.label(
                 RichText::new(format!("⏳ {queued} queued"))
                     .small()
-                    .color(Color32::from_rgb(217, 119, 6)),
+                    .color(palette.warning),
             )
             .on_hover_text("Waiting for a free slot — open the Queue sidebar");
             if ui.small_button("Clear queue").clicked() {
@@ -77,8 +90,7 @@ pub fn show(
             }
             if ui
                 .add(
-                    egui::Button::new(RichText::new("☰  Queue"))
-                        .selected(state.show_queue),
+                    egui::Button::new(RichText::new("☰  Queue")).selected(state.show_queue),
                 )
                 .on_hover_text("Toggle the queue sidebar")
                 .clicked()
@@ -88,17 +100,21 @@ pub fn show(
         });
     });
 
-    ui.add_space(6.0);
+    ui.add_space(spacing.sm);
 
     ui.horizontal_wrapped(|ui| {
         ui.label("Search:");
-        ui.add(
+        let search = ui.add(
             egui::TextEdit::singleline(&mut state.filter_text)
                 .hint_text("file, id or url")
-                .desired_width(220.0)
-                .margin(egui::Margin::symmetric(6.0, 4.0)),
+                .desired_width(sizes.search_width)
+                .margin(egui::Margin::symmetric(spacing.sm, spacing.xs)),
         );
-        if ui.small_button("✕").clicked() {
+        // `Ctrl+F` is handled by the app loop, which raises this flag.
+        if std::mem::take(&mut state.focus_search) {
+            search.request_focus();
+        }
+        if components::icon_button(ui, "✕", "Clear the search") {
             state.filter_text.clear();
         }
         ui.separator();
@@ -117,12 +133,14 @@ pub fn show(
         if state.state_filter.is_none() {
             ui.checkbox(&mut state.show_completed, "show completed");
         }
-        ui.separator();
-        ui.label(
-            RichText::new("Double-click a row for details")
-                .small()
-                .color(ui.visuals().weak_text_color()),
-        );
+        if mode != LayoutMode::Compact {
+            ui.separator();
+            components::hint(
+                ui,
+                &palette,
+                "Enter: details · ↑/↓: select · Ctrl+F: search",
+            );
+        }
     });
 
     actions

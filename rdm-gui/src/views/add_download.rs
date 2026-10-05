@@ -1,11 +1,10 @@
 //! "New download" window — every flag of `rdm download` as a widget.
 
-use egui::{Context, RichText};
+use egui::Context;
 
 use crate::state::{GuiState, UiAction};
+use crate::theme::{self, components, Level, Sizes, Spacing};
 use crate::util;
-
-const EDIT_MARGIN: egui::Margin = egui::Margin::symmetric(6.0, 4.0);
 
 pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
     let mut actions = Vec::new();
@@ -16,24 +15,29 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
     let mut submit = false;
     let mut cancel = false;
 
+    let palette = theme::palette_ctx(ctx);
+    let sizes = Sizes::default();
+    let spacing = Spacing::default();
+    let edit_margin = egui::Margin::symmetric(spacing.sm, spacing.xs);
+
     egui::Window::new("New download")
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
-        .default_width(580.0)
+        .default_width(sizes.form_width)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
             egui::Grid::new("add-form")
                 .num_columns(2)
-                .spacing([12.0, 10.0])
-                .min_col_width(120.0)
+                .spacing(sizes.form_spacing)
+                .min_col_width(sizes.form_label_width)
                 .show(ui, |ui| {
                     ui.label("URL");
                     ui.add(
                         egui::TextEdit::singleline(&mut state.form.url)
                             .hint_text("https://example.com/file.zip")
-                            .margin(EDIT_MARGIN)
-                            .desired_width(380.0),
+                            .margin(edit_margin)
+                            .desired_width(sizes.edit_wide),
                     );
                     ui.end_row();
 
@@ -43,8 +47,8 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                         ui.add(
                             egui::TextEdit::singleline(&mut state.form.output)
                                 .hint_text("directory or full file path")
-                                .margin(EDIT_MARGIN)
-                                .desired_width(330.0),
+                                .margin(edit_margin)
+                                .desired_width(sizes.edit_medium),
                         );
                         if ui
                             .button("📂")
@@ -52,8 +56,7 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                             .clicked()
                         {
                             let start = util::existing_dir(&state.form.output);
-                            if let Some(dir) = util::pick_folder(start.as_deref(), "Output folder")
-                            {
+                            if let Some(dir) = util::pick_folder(start.as_deref(), "Output folder") {
                                 state.form.output = dir.display().to_string();
                             }
                         }
@@ -73,8 +76,8 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     ui.add(
                         egui::TextEdit::singleline(&mut state.form.chunk_size)
                             .hint_text("1MiB")
-                            .margin(EDIT_MARGIN)
-                            .desired_width(160.0),
+                            .margin(edit_margin)
+                            .desired_width(sizes.edit_narrow),
                     );
                     ui.end_row();
 
@@ -83,8 +86,8 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     ui.add(
                         egui::TextEdit::singleline(&mut state.form.max_speed)
                             .hint_text("unlimited")
-                            .margin(EDIT_MARGIN)
-                            .desired_width(160.0),
+                            .margin(edit_margin)
+                            .desired_width(sizes.edit_narrow),
                     );
                     ui.end_row();
 
@@ -97,8 +100,8 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     ui.add(
                         egui::TextEdit::singleline(&mut state.form.checksum)
                             .hint_text("sha256:…")
-                            .margin(EDIT_MARGIN)
-                            .desired_width(380.0),
+                            .margin(edit_margin)
+                            .desired_width(sizes.edit_wide),
                     );
                     ui.end_row();
 
@@ -106,8 +109,8 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     ui.add(
                         egui::TextEdit::singleline(&mut state.form.user_agent)
                             .hint_text("rdm/0.1.0")
-                            .margin(EDIT_MARGIN)
-                            .desired_width(380.0),
+                            .margin(edit_margin)
+                            .desired_width(sizes.edit_wide),
                     );
                     ui.end_row();
 
@@ -122,21 +125,25 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                 });
 
             if let Some(err) = &state.form_error {
-                ui.add_space(6.0);
-                ui.colored_label(egui::Color32::from_rgb(220, 38, 38), err);
+                ui.add_space(spacing.sm);
+                components::banner(ui, &palette, Level::Error, err);
             }
 
-            ui.add_space(10.0);
+            ui.add_space(spacing.lg);
             ui.separator();
             ui.horizontal(|ui| {
-                if ui.button(RichText::new("Start").strong()).clicked() {
+                if components::primary_button(ui, "Start").clicked() {
                     submit = true;
                 }
                 if ui.button("Cancel").clicked() {
                     cancel = true;
                 }
-                ui.add_space(12.0);
-                ui.small("Tip: a directory in “Output” keeps the server-provided filename.");
+                ui.add_space(spacing.xl);
+                components::hint(
+                    ui,
+                    &palette,
+                    "Tip: a directory in “Output” keeps the server-provided filename.",
+                );
             });
         });
 

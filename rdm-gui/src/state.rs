@@ -148,6 +148,9 @@ pub struct GuiState {
     pub settings_dirty: bool,
     /// Hide log lines below this level in the App log tab.
     pub log_filter: usize,
+    /// Set by the `Ctrl+F` shortcut; the toolbar consumes it by focusing the
+    /// search box on the next frame.
+    pub focus_search: bool,
     /// Snapshot of the backend queue, refreshed every frame.
     pub queue: Vec<crate::backend::PendingJob>,
 }
@@ -179,6 +182,7 @@ impl GuiState {
             data_dir_input: data_dir,
             settings_dirty: false,
             log_filter: 0,
+            focus_search: false,
             queue: Vec::new(),
         }
     }

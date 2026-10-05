@@ -17,6 +17,7 @@ mod backend;
 mod logging;
 mod settings;
 mod state;
+mod theme;
 mod util;
 mod views;
 
@@ -87,10 +88,12 @@ fn run(
     logging: Option<logging::LogControl>,
     forced_level: Option<&'static str>,
 ) -> Result<(), eframe::Error> {
+    // Window geometry comes from the design tokens, like every other size.
+    let sizes = theme::Sizes::default();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1180.0, 760.0])
-            .with_min_inner_size([860.0, 560.0])
+            .with_inner_size(sizes.window_default)
+            .with_min_inner_size(sizes.window_min)
             .with_title("RDM"),
         ..Default::default()
     };

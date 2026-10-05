@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use egui::{Color32, Context, RichText};
+use egui::Context;
 
 use rdm::models::DownloadState;
 
@@ -16,6 +16,7 @@ use crate::backend::{Backend, BackendEvent};
 use crate::logging::LogControl;
 use crate::settings::SettingsStore;
 use crate::state::{DetailTab, FooterPanel, GuiState, UiAction};
+use crate::theme::{self, components, Sizes, Spacing};
 use crate::util;
 
 pub struct RdmGuiApp {
@@ -349,6 +350,83 @@ impl RdmGuiApp {
         }
     }
 
+    // --------------------------------------------------------------- keyboard
+
+    /// Move the table selection by `delta` rows inside the visible set.
+    fn move_selection(&mut self, delta: isize) {
+        let rows: Vec<i64> = self.state.visible_rows().iter().map(|r| r.id).collect();
+        if rows.is_empty() {
+            return;
+        }
+        let current = self
+            .state
+            .selected
+            .and_then(|id| rows.iter().position(|r| *r == id));
+        let next = match current {
+            Some(pos) => (pos as isize + delta).clamp(0, rows.len() as isize - 1) as usize,
+            None if delta >= 0 => 0,
+            None => rows.len() - 1,
+        };
+        self.state.selected = Some(rows[next]);
+    }
+
+    /// Escape closes the top-most overlay, then the side panels.
+    fn close_overlay(&mut self) {
+        if self.state.show_add {
+            self.state.show_add = false;
+            self.state.form_error = None;
+        } else if self.state.pending_remove.is_some() {
+            self.state.pending_remove = None;
+        } else if self.state.detail_id.is_some() {
+            self.state.detail_id = None;
+        } else if self.state.footer_panel.is_some() {
+            self.state.footer_panel = None;
+        } else {
+            self.state.show_queue = false;
+            self.state.show_settings = false;
+        }
+    }
+
+    /// Keyboard design: the table is fully reachable without a mouse.
+    ///
+    /// The shortcuts only fire while no text field has focus, so typing in the
+    /// search box or in the "New download" form is never hijacked.
+    fn handle_shortcuts(&mut self, ctx: &Context) {
+        if ctx.wants_keyboard_input() {
+            return;
+        }
+        let (up, down, enter, escape, find, refresh) = ctx.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::Enter),
+                i.key_pressed(egui::Key::Escape),
+                i.modifiers.command && i.key_pressed(egui::Key::F),
+                i.key_pressed(egui::Key::F5),
+            )
+        });
+        if down {
+            self.move_selection(1);
+        }
+        if up {
+            self.move_selection(-1);
+        }
+        if enter {
+            if let Some(id) = self.state.selected {
+                self.state.detail_id = Some(id);
+            }
+        }
+        if find {
+            self.state.focus_search = true;
+        }
+        if refresh {
+            self.refresh(true);
+        }
+        if escape {
+            self.close_overlay();
+        }
+    }
+
     // ------------------------------------------------------------- rendering
 
     fn confirm_dialog(&mut self, ctx: &Context) -> Vec<UiAction> {
@@ -356,6 +434,8 @@ impl RdmGuiApp {
         let Some((id, label)) = self.state.pending_remove.clone() else {
             return actions;
         };
+        let palette = theme::palette_ctx(ctx);
+        let spacing = Spacing::default();
         let mut purge = self.settings.settings().purge_on_remove;
         let mut close = false;
         egui::Window::new("Remove download")
@@ -364,14 +444,11 @@ impl RdmGuiApp {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(format!("Remove {label} from the database?"));
-                ui.add_space(6.0);
+                ui.add_space(spacing.sm);
                 ui.checkbox(&mut purge, "also delete the downloaded file");
-                ui.add_space(10.0);
+                ui.add_space(spacing.lg);
                 ui.horizontal(|ui| {
-                    if ui
-                        .button(RichText::new("Remove").color(Color32::from_rgb(220, 38, 38)))
-                        .clicked()
-                    {
+                    if components::danger_button(ui, &palette, "Remove").clicked() {
                         actions.push(UiAction::Remove { id, purge });
                     }
                     if ui.button("Keep").clicked() {
@@ -399,7 +476,7 @@ impl eframe::App for RdmGuiApp {
         // Theme + global paddings, applied live whenever the toggle changes.
         let dark = self.settings.settings().dark_mode;
         if self.applied_dark != Some(dark) {
-            apply_theme(ctx, dark);
+            theme::install(ctx, dark);
             self.applied_dark = Some(dark);
         }
 
@@ -425,19 +502,23 @@ impl eframe::App for RdmGuiApp {
             self.refresh(true);
         }
 
+        self.handle_shortcuts(ctx);
+
         let mut actions: Vec<UiAction> = Vec::new();
         let active_jobs = self.backend.active_jobs();
         let queued = self.state.queue.len();
+        let sizes = Sizes::default();
+        let spacing = Spacing::default();
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
-            ui.add_space(6.0);
+            ui.add_space(spacing.sm);
             actions.extend(crate::views::toolbar::show(
                 ui,
                 &mut self.state,
                 active_jobs,
                 queued,
             ));
-            ui.add_space(4.0);
+            ui.add_space(spacing.xs);
         });
 
         egui::TopBottomPanel::bottom("status-bar")
@@ -449,20 +530,20 @@ impl eframe::App for RdmGuiApp {
         if self.state.footer_panel.is_some() {
             egui::TopBottomPanel::bottom("footer-panel")
                 .resizable(true)
-                .default_height(220.0)
-                .min_height(90.0)
+                .default_height(sizes.footer_default)
+                .min_height(sizes.footer_min)
                 .show(ctx, |ui| {
                     actions.extend(crate::views::footer::panel(ui, &mut self.state));
                 });
         }
 
-        let sidebar_max = sidebar_max_width(ctx.available_rect().width());
+        let sidebar_max = theme::sidebar_max_width(ctx.available_rect().width());
 
         if self.state.show_queue {
             egui::SidePanel::left("queue-sidebar")
                 .resizable(true)
-                .default_width(340.0)
-                .min_width(240.0)
+                .default_width(sizes.sidebar_default)
+                .min_width(sizes.sidebar_queue_min)
                 .max_width(sidebar_max)
                 .show(ctx, |ui| {
                     actions.extend(crate::views::queue_sidebar::show(ui, &mut self.state));
@@ -474,8 +555,8 @@ impl eframe::App for RdmGuiApp {
             let db_path = self.backend.db_path().display().to_string();
             egui::SidePanel::right("settings-sidebar")
                 .resizable(true)
-                .default_width(340.0)
-                .min_width(260.0)
+                .default_width(sizes.sidebar_default)
+                .min_width(sizes.sidebar_settings_min)
                 .max_width(sidebar_max)
                 .show(ctx, |ui| {
                     actions.extend(crate::views::settings_view::show(
@@ -533,35 +614,6 @@ impl eframe::App for RdmGuiApp {
     }
 }
 
-/// Cap sidebars so a long path / infinite-width widget cannot eat the list.
-fn sidebar_max_width(window_width: f32) -> f32 {
-    (window_width * 0.4).clamp(260.0, 400.0)
-}
-
-/// Set the palette plus the global paddings: roomier buttons/inputs and more
-/// vertical breathing room between widgets.
-fn apply_theme(ctx: &Context, dark: bool) {
-    let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-    style.spacing.button_padding = egui::vec2(12.0, 6.0);
-    style.spacing.interact_size = egui::vec2(40.0, 22.0);
-    ctx.set_style(style);
-    ctx.set_visuals(if dark {
-        egui::Visuals::dark()
-    } else {
-        egui::Visuals::light()
-    });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::sidebar_max_width;
-
-    #[test]
-    fn sidebar_never_eats_the_window() {
-        assert_eq!(sidebar_max_width(2000.0), 400.0);
-        assert_eq!(sidebar_max_width(1000.0), 400.0);
-        assert_eq!(sidebar_max_width(800.0), 320.0);
-        assert_eq!(sidebar_max_width(400.0), 260.0);
-    }
-}
+// The palette installation, the sidebar cap and their unit tests now live in
+// `crate::theme` — see `theme::install`, `theme::sidebar_max_width` and
+// `theme::tests::sidebar_never_eats_the_window`.
