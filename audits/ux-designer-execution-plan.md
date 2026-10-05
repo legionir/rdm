@@ -102,7 +102,7 @@
 | --- | --- | --- |
 | UX policy unit tests (confirmations, copy, glossary compliance, legend/microcopy) | PASS | CI run `build-gui-windows` → `Test GUI crate` |
 | Terminology check (rules + exceptions) | PASS | `audits/evidence/ux-terminology-report.txt` |
-| Rust compile + GUI tests | PASS | CI run (see handoff §5) |
+| Rust compile + GUI tests | PASS | CI runs 37350073234 (`3eb2def`) and 37350848407 (`47253af`); CLI regression job `test-windows` ✓ |
 | CLI/engine regression | PASS | CI run → job `test-windows` |
 | Baseline (before) evidence | recorded | `audits/evidence/ux-baseline-*.txt` |
 | User testing | **MISSING — NOT_APPLICABLE in this environment** | `UX-ESC-001` |

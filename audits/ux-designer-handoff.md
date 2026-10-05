@@ -8,9 +8,10 @@
   [`ux-usability-evaluation.md`](ux-usability-evaluation.md)
 - **Required actions:** review/approve against the usability criteria, record the state, then
   answer the open questions in §7 of the flows document
-- **Branch / commit:** `arena/01a10cef-rdm` @ `3eb2def`; CI run
-  [37350073234](https://github.com/legionir/rdm/actions/runs/37350073234) — `Build GUI binary` ✓,
-  `Test GUI crate` ✓, `test-windows` (CLI regression) ✓
+- **Branch / commit:** `arena/01a10cef-rdm` @ `47253af`; final CI run
+  [37350848407](https://github.com/legionir/rdm/actions/runs/37350848407) — `Build GUI binary` ✓,
+  `Test GUI crate` ✓, `test-windows` (CLI regression) ✓ (first code-green run of this increment:
+  [37350073234](https://github.com/legionir/rdm/actions/runs/37350073234) @ `3eb2def`)
 - **Pull request:** [#8](https://github.com/legionir/rdm/pull/8) (same branch; this increment is
   part of it)
 
@@ -167,7 +168,7 @@ metric depends on it.
 | EVIDENCE-UX-002 | Confirmation policy exists, names consequences and is wired to the actions | FILE / LINE | `rdm-gui/src/ux.rs` (Confirm, DESTRUCTIVE, BulkAction), `rdm-gui/src/app.rs` (`confirm_dialog`, `AskRemoveCompleted`, `AskRestart`, `confirm_destructive`), `rdm-gui/src/views/download_list.rs` (row actions) |
 | EVIDENCE-UX-003 | Flows/IA/entry/exit/error points and the walkthrough | DOCUMENT / SECTION | `audits/ux-flows-and-ia.md` §1–§7; `audits/ux-usability-evaluation.md` §2 |
 | EVIDENCE-UX-004 | Terminology consistency (0 violations, from 15) | TEST_RESULT / FILE | `audits/evidence/ux-terminology-baseline.txt`, `audits/evidence/ux-terminology-report.txt`, `audits/ux-terminology-check.py` |
-| EVIDENCE-UX-005 | Rust compile + tests + CLI regression on the final head | TEST_RESULT / BUILD_OUTPUT | CI run [37350073234](https://github.com/legionir/rdm/actions/runs/37350073234) → `audits/evidence/ux-ci-run.json`, `audits/evidence/ux-ci-jobs.json` |
+| EVIDENCE-UX-005 | Rust compile + tests + CLI regression on the final head | TEST_RESULT / BUILD_OUTPUT | CI runs [37350073234](https://github.com/legionir/rdm/actions/runs/37350073234) (code head `3eb2def`) and [37350848407](https://github.com/legionir/rdm/actions/runs/37350848407) (docs head `47253af`) → `audits/evidence/ux-ci-run.json`, `ux-ci-jobs.json`, `ux-ci-run-final.json`, `ux-ci-jobs-final.json` |
 | EVIDENCE-UX-006 | The two earlier CI failures of this increment and their causes (module not registered; a test asserting the file-consequence phrase) — traceability of the fixes | LOG | check-run annotations of runs 37348453897 and 37349440692 (recorded in the commit messages `39372c8`, `3eb2def`) |
 
 ## 6. Findings, risks, recommendations
@@ -261,7 +262,7 @@ builds/tests fail), documented, and escalated to the responsible persona.
 PR [#8](https://github.com/legionir/rdm/pull/8) (`arena/01a10cef-rdm` → `main`) carries the UI
 increment; this UX increment is pushed to the same branch and summarised in a PR comment so the
 Design Manager and PM review both together. CI on the current head: run
-[37350073234](https://github.com/legionir/rdm/actions/runs/37350073234) — all jobs ✓.
+[37350848407](https://github.com/legionir/rdm/actions/runs/37350848407) — all jobs ✓.
 
 ## 10. Execution Result
 
@@ -288,7 +289,7 @@ Findings: FIND-UX-001..012 (3 High: unconfirmed bulk delete incl. files; unconfi
 Changes: created rdm-gui/src/ux.rs + 4 UX artifacts + checker + evidence; modified 11 GUI
   files, the CLI help text, the README and (out of scope, escalated) the CI workflow;
   removed one stale UiAction variant
-Tests: TEST-UX-001..013 PASS (CI 37350073234 + static audits), TEST-UX-014 baseline PASS,
+Tests: TEST-UX-001..013 PASS (CI 37350073234 / 37350848407 + static audits), TEST-UX-014 baseline PASS,
   TEST-UX-015 user testing NOT_RUN (MISSING, UX-ESC-001)
 Evidence: EVIDENCE-UX-001..006
 ExecutionPlan: audits/ux-designer-execution-plan.md
