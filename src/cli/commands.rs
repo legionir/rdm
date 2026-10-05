@@ -45,15 +45,15 @@ pub enum Command {
     Download(DownloadArgs),
     /// Pause a download (works while the engine runs in another terminal).
     Pause(IdArgs),
-    /// Resume a paused/interrupted download.
+    /// Continue a paused, interrupted or cancelled download.
     Resume(IdArgs),
-    /// Cancel a download; chunk data is kept unless removed.
+    /// Cancel a download; its partial data is kept so it can continue later.
     Cancel(IdArgs),
     /// List tracked downloads.
     List(ListArgs),
     /// Show detailed information about one download.
     Info(InfoArgs),
-    /// Remove a download record (and optionally its files).
+    /// Remove a download from the list (and optionally delete its file).
     Remove(RemoveArgs),
 }
 
@@ -71,11 +71,11 @@ pub struct DownloadArgs {
     #[arg(short, long, default_value_t = 8, value_parser = clap::value_parser!(u16).range(1..=128), value_name = "N")]
     pub connections: u16,
 
-    /// Resume an existing incomplete download for the same URL+output.
+    /// Continue an existing unfinished download for the same URL and output.
     #[arg(short, long)]
     pub resume: bool,
 
-    /// Restart from scratch even if a download record exists.
+    /// Start over from the beginning even if a download is already tracked.
     #[arg(short, long)]
     pub force: bool,
 
@@ -135,7 +135,7 @@ pub struct InfoArgs {
 #[derive(Args, Debug)]
 pub struct RemoveArgs {
     pub id: String,
-    /// Also delete the assembled output file and its sidecar.
+    /// Also delete the finished file and its checksum sidecar.
     #[arg(long)]
     pub purge: bool,
 }
@@ -243,7 +243,7 @@ async fn run_resume(data_dir: &PathBuf, id: &str) -> Result<u8> {
         _ => {}
     }
     if row.output_path.is_empty() {
-        bail!("download record has no output path");
+        bail!("this download has no output path yet; start it again with --output <PATH>");
     }
     let max_speed = None; // resume keeps the stored engine defaults; no CLI override here
     let opts = EngineOptions {

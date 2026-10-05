@@ -12,6 +12,7 @@ use rdm::utils::human;
 use crate::state::{progress_of, GuiState, UiAction};
 use crate::theme::{self, components, Palette, Radii, Sizes, Spacing, Table};
 use crate::util;
+use crate::ux;
 
 /// Column widths adapt to the available width; `FILE` is the flexible one.
 pub struct Columns {
@@ -142,7 +143,7 @@ pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
             components::hint(
                 ui,
                 &palette,
-                "No downloads match. Press “New download” to add one.",
+                "Nothing here yet — press “New download” to add your first download.",
             );
             ui.add_space(spacing.xxl);
         });
@@ -286,9 +287,11 @@ fn row(
             .layout(Layout::left_to_right(Align::Center)),
     );
 
-    // STATE — glyph + label + semantic colour on a chip surface.
+    // STATE — glyph + label + semantic colour on a chip surface; the tooltip
+    // carries the legend definition and the next step for that state.
     cell(&mut row_ui, cols.state, "state", |ui| {
-        components::status_chip(ui, palette, record.state);
+        components::status_chip(ui, palette, record.state)
+            .on_hover_text(ux::legend_for(record.state).hover_text());
     });
 
     // FILE
@@ -385,26 +388,41 @@ fn row(
         ui.spacing_mut().button_padding = spacing.icon_button;
         ui.spacing_mut().item_spacing.x = spacing.icon_gap;
         let running = record.state.active();
-        let resumable = !running && record.state != DownloadState::Completed;
+        // Resume only where the backend accepts it: `Backend::resume` rejects
+        // terminal states except Cancelled, so a Failed download is offered
+        // Restart instead of a button that could only produce an error.
+        let resumable = !running
+            && !matches!(
+                record.state,
+                DownloadState::Completed | DownloadState::Failed
+            );
 
         if running {
-            if components::icon_button(ui, "⏸", "Pause (rdm pause)") {
+            if components::icon_button(ui, "⏸", ux::pause_tooltip()) {
                 actions.push(UiAction::Pause(record.id));
             }
-            if components::icon_button(ui, "⏹", "Cancel (rdm cancel)") {
+            if components::icon_button(ui, "⏹", ux::cancel_tooltip()) {
                 actions.push(UiAction::Cancel(record.id));
             }
-        } else if resumable && components::icon_button(ui, "▶", "Resume (rdm resume)") {
+        } else if resumable && components::icon_button(ui, "▶", ux::resume_tooltip()) {
             actions.push(UiAction::Resume(record.id));
         }
-        if !running && components::icon_button(ui, "⟲", "Restart from scratch (rdm download --force)")
+        if !running
+            && components::icon_button(ui, "⟲", ux::restart_tooltip(record.state))
         {
-            actions.push(UiAction::Restart(record.id));
+            actions.push(UiAction::AskRestart(record.id));
         }
-        if components::icon_button(ui, "📂", "Open the containing folder") {
+        if components::icon_button(ui, "📂", ux::open_folder_tooltip()) {
             actions.push(UiAction::OpenOutputFolder(record.id));
         }
-        if components::icon_button(ui, "🗑", "Remove record (rdm remove)") {
+        if running {
+            // Disabled with an explanation instead of failing in the backend.
+            let disabled = ui.add_enabled(
+                false,
+                egui::Button::new(RichText::new("🗑").small()),
+            );
+            disabled.on_disabled_hover_text(ux::remove_tooltip(true));
+        } else if components::icon_button(ui, "🗑", ux::remove_tooltip(false)) {
             actions.push(UiAction::AskRemove(record.id));
         }
     });

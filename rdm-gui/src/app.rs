@@ -15,8 +15,9 @@ use rdm::models::DownloadState;
 use crate::backend::{Backend, BackendEvent};
 use crate::logging::LogControl;
 use crate::settings::SettingsStore;
-use crate::state::{DetailTab, FooterPanel, GuiState, UiAction};
+use crate::state::{DetailTab, FooterPanel, GuiState, PendingConfirm, UiAction};
 use crate::theme::{self, components, Sizes, Spacing};
+use crate::ux::{self, BulkAction, Confirm};
 use crate::util;
 
 pub struct RdmGuiApp {
@@ -205,55 +206,71 @@ impl RdmGuiApp {
                 }
             }
             UiAction::Restart(id) => {
-                let defaults = self.settings.settings().to_request();
-                let limit = self.max_concurrent();
-                match self.backend.restart(id, &defaults, limit) {
-                    Ok(_) => self
-                        .state
-                        .push_log("warn", format!("restarting #{id} from scratch")),
-                    Err(err) => self.state.push_log("error", format!("{err:#}")),
-                }
+                self.state.pending_confirm = None;
+                self.restart_now(id);
             }
             UiAction::AskRemove(id) => {
-                let label = self
-                    .state
-                    .downloads
-                    .iter()
-                    .find(|r| r.id == id)
-                    .map(|r| format!("{} ({})", r.public_id, r.filename))
-                    .unwrap_or_else(|| format!("#{id}"));
-                if self.settings.settings().confirm_remove {
-                    self.state.pending_remove = Some((id, label));
+                let label = self.describe(id);
+                if self.confirm_destructive() {
+                    self.state.pending_confirm = Some(PendingConfirm::Remove { id, label });
                 } else {
                     let purge = self.settings.settings().purge_on_remove;
                     self.report(self.backend.remove(id, purge));
                     self.refresh(true);
                 }
             }
+            UiAction::AskRestart(id) => {
+                // The progress is discarded, so this asks before acting.
+                let label = self.describe(id);
+                if self.confirm_destructive() {
+                    self.state.pending_confirm = Some(PendingConfirm::Restart { id, label });
+                } else {
+                    self.restart_now(id);
+                }
+            }
+            UiAction::AskRemoveCompleted => {
+                let subject = self
+                    .state
+                    .downloads
+                    .iter()
+                    .filter(|r| r.state == DownloadState::Completed)
+                    .count();
+                if subject == 0 {
+                    self.state
+                        .push_log("info", BulkAction::RemoveCompleted.nothing_to_do());
+                } else if self.confirm_destructive() {
+                    self.state.pending_confirm =
+                        Some(PendingConfirm::RemoveCompleted { subject });
+                } else {
+                    self.remove_completed_now(self.settings.settings().purge_on_remove);
+                }
+            }
             UiAction::Remove { id, purge } => {
-                self.state.pending_remove = None;
+                self.state.pending_confirm = None;
                 self.report(self.backend.remove(id, purge));
                 self.refresh(true);
             }
-            UiAction::RemoveCompleted => {
-                let purge = self.settings.settings().purge_on_remove;
-                match self.backend.remove_completed(purge) {
-                    Ok(n) => self.state.push_log("info", format!("removed {n} record(s)")),
-                    Err(err) => self.state.push_log("error", format!("{err:#}")),
-                }
-                self.refresh(true);
+            UiAction::RemoveCompletedConfirmed { purge } => {
+                self.state.pending_confirm = None;
+                self.remove_completed_now(purge);
             }
             UiAction::PauseAll => match self.backend.pause_all() {
+                Ok(0) => self
+                    .state
+                    .push_log("info", BulkAction::PauseAll.nothing_to_do()),
                 Ok(n) => self
                     .state
-                    .push_log("info", format!("pause requested for {n} download(s)")),
+                    .push_log("info", BulkAction::PauseAll.done(n)),
                 Err(err) => self.state.push_log("error", format!("{err:#}")),
             },
             UiAction::ResumeAll => {
                 let defaults = self.settings.settings().to_request();
                 let limit = self.max_concurrent();
                 match self.backend.resume_all(&defaults, limit) {
-                    Ok(n) => self.state.push_log("info", format!("resuming {n} download(s)")),
+                    Ok(0) => self
+                        .state
+                        .push_log("info", BulkAction::ResumeAll.nothing_to_do()),
+                    Ok(n) => self.state.push_log("info", BulkAction::ResumeAll.done(n)),
                     Err(err) => self.state.push_log("error", format!("{err:#}")),
                 }
             }
@@ -323,19 +340,70 @@ impl RdmGuiApp {
                     Err(err) => self.state.push_log("error", format!("{err:#}")),
                 }
             }
-            UiAction::CancelPending(seq) => match self.backend.cancel_pending(seq) {
+            UiAction::DropQueued(seq) => match self.backend.cancel_pending(seq) {
                 Some(job) => self
                     .state
-                    .push_log("warn", format!("removed {} from the queue", job.url)),
-                None => self.state.push_log("warn", "that job already started"),
+                    .push_log("info", format!("Dropped {} from the queue.", job.url)),
+                None => self.state.push_log(
+                    "info",
+                    "That download already started — it is no longer in the queue.",
+                ),
             },
-            UiAction::ClearQueue => {
+            UiAction::DropQueue => {
                 let n = self.backend.clear_queue();
-                self.state
-                    .push_log("warn", format!("dropped {n} queued job(s)"));
+                if n == 0 {
+                    self.state
+                        .push_log("info", BulkAction::DropQueue.nothing_to_do());
+                } else {
+                    self.state
+                        .push_log("info", BulkAction::DropQueue.done(n));
+                }
             }
             UiAction::ClearLog => self.state.log.clear(),
         }
+    }
+
+    /// Does a destructive action ask before acting? Default: yes.
+    fn confirm_destructive(&self) -> bool {
+        self.settings.settings().confirm_remove
+    }
+
+    /// Human label for one download, e.g. `dl-8f3c2a1b (ubuntu.iso)`.
+    fn describe(&self, id: i64) -> String {
+        self.state
+            .downloads
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| format!("{} ({})", r.public_id, r.filename))
+            .unwrap_or_else(|| format!("#{id}"))
+    }
+
+    /// Start a download again from the beginning (confirmed or not).
+    fn restart_now(&mut self, id: i64) {
+        let defaults = self.settings.settings().to_request();
+        let limit = self.max_concurrent();
+        match self.backend.restart(id, &defaults, limit) {
+            Ok(_) => self.state.push_log(
+                "info",
+                format!("Restarting {} from the beginning…", self.describe(id)),
+            ),
+            Err(err) => self.state.push_log("error", format!("{err:#}")),
+        }
+    }
+
+    /// Remove every completed download; the count and the file decision are
+    /// always reported back.
+    fn remove_completed_now(&mut self, purge: bool) {
+        match self.backend.remove_completed(purge) {
+            Ok(0) => self
+                .state
+                .push_log("info", BulkAction::RemoveCompleted.nothing_to_do()),
+            Ok(n) => self
+                .state
+                .push_log("info", BulkAction::RemoveCompleted.done(n)),
+            Err(err) => self.state.push_log("error", format!("{err:#}")),
+        }
+        self.refresh(true);
     }
 
     /// 0 means "no limit".
@@ -375,8 +443,8 @@ impl RdmGuiApp {
         if self.state.show_add {
             self.state.show_add = false;
             self.state.form_error = None;
-        } else if self.state.pending_remove.is_some() {
-            self.state.pending_remove = None;
+        } else if self.state.pending_confirm.is_some() {
+            self.state.pending_confirm = None;
         } else if self.state.detail_id.is_some() {
             self.state.detail_id = None;
         } else if self.state.footer_panel.is_some() {
@@ -429,40 +497,58 @@ impl RdmGuiApp {
 
     // ------------------------------------------------------------- rendering
 
+    /// The single confirmation dialog, driven entirely by [`Confirm`] policy:
+    /// title, consequence text, the destructive and the safe action.
     fn confirm_dialog(&mut self, ctx: &Context) -> Vec<UiAction> {
         let mut actions = Vec::new();
-        let Some((id, label)) = self.state.pending_remove.clone() else {
+        let Some(pending) = self.state.pending_confirm.clone() else {
             return actions;
         };
+        let confirm = pending.policy();
         let palette = theme::palette_ctx(ctx);
         let spacing = Spacing::default();
         let mut purge = self.settings.settings().purge_on_remove;
         let mut close = false;
-        egui::Window::new("Remove download")
+        egui::Window::new(confirm.title())
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                ui.label(format!("Remove {label} from the database?"));
-                ui.add_space(spacing.sm);
-                ui.checkbox(&mut purge, "also delete the downloaded file");
+                if let Some(label) = pending.label() {
+                    components::section_title(ui, label);
+                    ui.add_space(spacing.xs);
+                }
+                components::banner(ui, &palette, components::Level::Warning, &confirm.body(pending.subject()));
+                if confirm.has_file_checkbox() {
+                    ui.add_space(spacing.sm);
+                    ui.checkbox(&mut purge, "also delete the finished file(s)");
+                }
                 ui.add_space(spacing.lg);
                 ui.horizontal(|ui| {
-                    if components::danger_button(ui, &palette, "Remove").clicked() {
-                        actions.push(UiAction::Remove { id, purge });
+                    if components::danger_button(ui, &palette, confirm.confirm_label()).clicked() {
+                        actions.push(confirmed_action(&pending, purge));
                     }
-                    if ui.button("Keep").clicked() {
+                    if ui.button(confirm.keep_label()).clicked() {
                         close = true;
                     }
                 });
             });
         if close {
-            self.state.pending_remove = None;
+            self.state.pending_confirm = None;
         }
-        if purge != self.settings.settings().purge_on_remove {
+        if confirm.has_file_checkbox() && purge != self.settings.settings().purge_on_remove {
             self.settings.settings_mut().purge_on_remove = purge;
         }
         actions
+    }
+}
+
+/// Turn the user's answer into the action that does the work.
+fn confirmed_action(pending: &PendingConfirm, purge: bool) -> UiAction {
+    match pending {
+        PendingConfirm::Remove { id, .. } => UiAction::Remove { id: *id, purge },
+        PendingConfirm::RemoveCompleted { .. } => UiAction::RemoveCompletedConfirmed { purge },
+        PendingConfirm::Restart { id, .. } => UiAction::Restart(*id),
     }
 }
 

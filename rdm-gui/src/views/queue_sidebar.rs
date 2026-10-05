@@ -4,6 +4,7 @@ use egui::{Align, Layout, RichText, Ui};
 
 use crate::state::{GuiState, UiAction};
 use crate::theme::{self, components, Palette, Spacing};
+use crate::ux::{self, BulkAction};
 
 pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
     let mut actions = Vec::new();
@@ -13,7 +14,7 @@ pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
     ui.add_space(spacing.xs);
     ui.horizontal(|ui| {
         ui.heading("Queue");
-        components::hint(ui, &palette, format!("{} waiting", state.queue.len()));
+        components::hint(ui, &palette, format!("{} queued", state.queue.len()));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if ui
                 .button("✕")
@@ -22,8 +23,13 @@ pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
             {
                 state.show_queue = false;
             }
-            if !state.queue.is_empty() && ui.small_button("Clear queue").clicked() {
-                actions.push(UiAction::ClearQueue);
+            if !state.queue.is_empty()
+                && ui
+                    .small_button(format!("{}", BulkAction::DropQueue))
+                    .on_hover_text(ux::drop_queue_tooltip())
+                    .clicked()
+            {
+                actions.push(UiAction::DropQueue);
             }
         });
     });
@@ -34,7 +40,7 @@ pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
         components::hint(
             ui,
             &palette,
-            "The queue is empty — new downloads start immediately.",
+            "Nothing queued — new downloads start straight away.",
         );
         return actions;
     }
@@ -75,8 +81,9 @@ fn job_row(
     ui.horizontal(|ui| {
         components::meta(ui, palette, format!("{}.", position + 1));
         ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-            if components::icon_button(ui, "✕", "Drop from queue") {
-                actions.push(UiAction::CancelPending(seq));
+            if components::icon_button(ui, "✕", "Drop from the queue — nothing has been downloaded yet")
+            {
+                actions.push(UiAction::DropQueued(seq));
             }
             ui.vertical(|ui| {
                 ui.label(

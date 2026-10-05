@@ -5,6 +5,7 @@ use egui::Context;
 use crate::state::{GuiState, UiAction};
 use crate::theme::{self, components, Level, Sizes, Spacing};
 use crate::util;
+use crate::ux;
 
 pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
     let mut actions = Vec::new();
@@ -132,18 +133,21 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
             ui.add_space(spacing.lg);
             ui.separator();
             ui.horizontal(|ui| {
-                if components::primary_button(ui, "Start").clicked() {
+                if components::primary_button(ui, "Start")
+                    .on_hover_text("Add the download; it starts as soon as a slot is free")
+                    .clicked()
+                {
                     submit = true;
                 }
-                if ui.button("Cancel").clicked() {
+                if ui
+                    .button("Cancel")
+                    .on_hover_text("Close without adding anything")
+                    .clicked()
+                {
                     cancel = true;
                 }
                 ui.add_space(spacing.xl);
-                components::hint(
-                    ui,
-                    &palette,
-                    "Tip: a directory in “Output” keeps the server-provided filename.",
-                );
+                components::hint(ui, &palette, ux::ADD_TIP);
             });
         });
 

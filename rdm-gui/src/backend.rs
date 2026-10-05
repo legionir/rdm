@@ -416,13 +416,17 @@ impl Backend {
 
     /// Bulk helper: resume everything that is paused/interrupted/failed.
     pub fn resume_all(&self, defaults: &StartRequest, max_concurrent: usize) -> Result<usize> {
+        // Only the states `resume()` accepts are continued here: it rejects
+        // terminal states (`Failed` needs `restart`), so including them would
+        // abort the whole bulk action on the first failed download and leave
+        // the remaining ones untouched (UX finding FIND-UX-004).
         let mut n = 0;
         for row in self.list()? {
-            let restartable = matches!(
+            let continuable = matches!(
                 row.state,
-                DownloadState::Paused | DownloadState::Interrupted | DownloadState::Failed
+                DownloadState::Paused | DownloadState::Interrupted | DownloadState::Cancelled
             );
-            if restartable {
+            if continuable {
                 self.resume(row.id, defaults, max_concurrent)?;
                 n += 1;
             }

@@ -6,6 +6,7 @@ use egui::{Layout, RichText, Ui};
 use crate::state::{FooterPanel, GuiState, UiAction};
 use crate::theme::{self, components, Palette, Sizes, Spacing};
 use crate::util;
+use crate::ux;
 
 /// Log-pane filters: label plus the levels it keeps.
 const LOG_FILTERS: [(&str, &[&str]); 4] = [
@@ -23,14 +24,14 @@ pub fn status_bar(ui: &mut Ui, state: &mut GuiState) {
     let spacing = Spacing::default();
     ui.add_space(spacing.xxs);
     ui.horizontal(|ui| {
-        let (done, waiting, running, failed, cancelled) = state.counts();
+        let (completed, queued, running, failed, cancelled) = state.counts();
         let text = format!(
-            "{} ({} record(s) · {} done · {} running · {} waiting · {} failed · {} cancelled)",
+            "{} · {} download(s) · {} completed · {} running · {} queued · {} failed · {} cancelled",
             state.status,
             state.downloads.len(),
-            done,
+            completed,
             running,
-            waiting,
+            queued,
             failed,
             cancelled
         );
@@ -42,14 +43,15 @@ pub fn status_bar(ui: &mut Ui, state: &mut GuiState) {
                 sizes.status_height,
             ],
             egui::Label::new(RichText::new(text).small().color(color)).truncate(),
-        );
+        )
+        .on_hover_text(ux::legend_tooltip());
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .add(
                     egui::Button::new(RichText::new("App Log").small())
                         .selected(state.footer_panel == Some(FooterPanel::AppLog)),
                 )
-                .on_hover_text("Show the application log")
+                .on_hover_text("Show the application log (engine + interface messages)")
                 .clicked()
             {
                 state.footer_panel = if state.footer_panel == Some(FooterPanel::AppLog) {
@@ -63,7 +65,7 @@ pub fn status_bar(ui: &mut Ui, state: &mut GuiState) {
                     egui::Button::new(RichText::new("Events").small())
                         .selected(state.footer_panel == Some(FooterPanel::Events)),
                 )
-                .on_hover_text("Show the events of the selected download")
+                .on_hover_text("Show what happened to the selected download")
                 .clicked()
             {
                 state.footer_panel = if state.footer_panel == Some(FooterPanel::Events) {
@@ -177,7 +179,7 @@ fn events_box(ui: &mut Ui, state: &GuiState, palette: &Palette) {
 /// Captured engine + UI log, one wrapped line each.
 fn log_box(ui: &mut Ui, state: &GuiState, palette: &Palette) {
     if state.log.is_empty() {
-        components::hint(ui, palette, "Nothing logged yet.");
+        components::hint(ui, palette, "Nothing logged yet — messages appear here as you use the app.");
         return;
     }
     let allowed = LOG_FILTERS[state.log_filter.min(LOG_FILTERS.len() - 1)].1;

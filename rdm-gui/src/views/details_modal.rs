@@ -13,6 +13,7 @@ use rdm::utils::human;
 use crate::state::{DetailTab, GuiState, UiAction};
 use crate::theme::{self, components, Palette, Sizes, Spacing};
 use crate::util;
+use crate::ux;
 
 pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
     let mut actions = Vec::new();
@@ -48,9 +49,21 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     }
                 }
                 ui.separator();
-                ui.label(components::state_text(&palette, record.state));
+                ui.label(components::state_text(&palette, record.state))
+                    .on_hover_text(ux::legend_for(record.state).hover_text());
                 components::hint(ui, &palette, format!("· {}", record.filename));
             });
+            // Plain-language meaning and the next step for the current state.
+            components::hint(
+                ui,
+                &palette,
+                format!(
+                    "{} — {}. Next: {}",
+                    record.state,
+                    ux::legend_for(record.state).meaning,
+                    ux::legend_for(record.state).next_step
+                ),
+            );
             ui.separator();
             ui.add_space(spacing.sm);
 
@@ -104,7 +117,7 @@ fn overview(
             }
             field(ui, "file", record.filename.clone());
             field(ui, "output", record.output_path.clone());
-            field(ui, "chunks dir", record.chunk_dir.clone());
+            field(ui, "partial data folder", record.chunk_dir.clone());
             field(
                 ui,
                 "size",
@@ -121,7 +134,15 @@ fn overview(
             field(ui, "speed", human::human_rate(state.rate_of(record.id)));
             field(ui, "connections", record.max_connections.to_string());
             field(ui, "retries", record.retries.to_string());
-            field(ui, "accept ranges", record.accept_ranges.to_string());
+            field(
+                ui,
+                "server supports ranges",
+                if record.accept_ranges {
+                    "yes — a stopped download continues where it left off".to_string()
+                } else {
+                    "no — a stopped download starts over from the beginning".to_string()
+                },
+            );
             if let (Some(algo), Some(expected)) =
                 (&record.checksum_algorithm, &record.checksum_expected)
             {
@@ -161,10 +182,18 @@ fn overview(
         if ui.button("Copy output path").clicked() {
             actions.push(UiAction::CopyToClipboard(record.output_path.clone()));
         }
-        if ui.button("Open folder").clicked() {
+        if ui
+            .button("Open folder")
+            .on_hover_text(ux::open_folder_tooltip())
+            .clicked()
+        {
             actions.push(UiAction::OpenOutputFolder(record.id));
         }
-        if ui.button("Copy CLI command").clicked() {
+        if ui
+            .button("Copy CLI command")
+            .on_hover_text("Copy the matching `rdm download …` command for a terminal")
+            .clicked()
+        {
             actions.push(UiAction::CopyToClipboard(cli_command(record)));
         }
     });
@@ -191,7 +220,11 @@ fn cli_command(record: &DownloadRecord) -> String {
 fn chunks(ui: &mut Ui, state: &GuiState, palette: &Palette) {
     let sizes = Sizes::default();
     if state.chunks.is_empty() {
-        components::hint(ui, palette, "No chunk rows yet.");
+        components::hint(
+            ui,
+            palette,
+            "No partial data yet — nothing has been fetched for this download.",
+        );
         return;
     }
     egui::Grid::new("detail-chunks")

@@ -117,7 +117,7 @@ vice versa.
 | `rdm list [--state …]` | Download table (full-width rows: click selects, double-click opens details) with search box and state filter |
 | `rdm info <ID>` | **Overview**, **Chunks** and **Events** tabs of the details modal |
 | `rdm info --json` | **JSON** tab of the details modal (with *Copy JSON*) |
-| `rdm remove <ID> [--purge]` | 🗑 row button (confirmation + "delete file too") and *Clear completed* |
+| `rdm remove <ID> [--purge]` | 🗑 row button (asks first; tick *also delete the finished file(s)*) and *Remove completed…* |
 | `--data-dir DIR` | `--data-dir` flag and the *Metadata directory* field in Settings |
 
 Beyond the CLI surface the window adds:
@@ -128,11 +128,20 @@ Beyond the CLI surface the window adds:
 * **Download queue** — at most `max_concurrent` transfers run at once
   (default 3, `0` = unlimited); the rest wait in the *Queue* sidebar and can be
   dropped individually or all at once.
-* **Status bar** — a one-line footer with record counters; the **Events** and
+* **Status bar** — a one-line footer with download counters; the **Events** and
   **App log** buttons expand a box above it (wrapping long lines). The engine's
   `tracing` output is captured in-process and shown live; verbosity is a combo
   box (`off`..`trace`), also settable with `-v` / `-vv` / `-vvv`, and `RUST_LOG`
   still wins.
+* **Confirmations** — destructive actions ask first and name the consequence:
+  *Remove* (one or all completed downloads) and *Restart from scratch* (which
+  discards the progress and overwrites the file). The dialog says what is lost
+  and whether it can be undone; turning the setting off makes the same actions
+  act immediately. Queued items are *dropped* without a dialog because nothing
+  has been downloaded yet.
+* **State legend** — every state chip, the details header and the status-bar
+  counters explain what the state means in plain words and what to do next, so
+  the terms used by the CLI and the window stay the same everywhere.
 * **Safe exit** — closing the window pauses the transfers this window owns and
   waits for their engines to flush, exactly like Ctrl+C does for the CLI;
   anything that cannot stop within 5 s is marked `interrupted` so it offers
@@ -150,7 +159,7 @@ max_speed       = ""          # e.g. "5MB/s"
 timeout_secs    = 30
 max_concurrent  = 3           # 0 = unlimited
 refresh_ms      = 600
-confirm_remove  = true
+confirm_remove  = true          # ask before removing or restarting
 purge_on_remove = false
 dark_mode       = true
 log_level       = "info"

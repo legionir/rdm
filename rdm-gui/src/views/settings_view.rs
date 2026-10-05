@@ -145,7 +145,7 @@ pub fn show(
 
             ui.add_space(spacing.md);
             ui.label("Max concurrent downloads")
-                .on_hover_text("0 = unlimited; extra jobs wait in the queue");
+                .on_hover_text("0 = unlimited; extra downloads wait in the queue");
             ui.add(egui::Slider::new(&mut settings.max_concurrent, 0..=16));
 
             ui.add_space(spacing.xs);
@@ -153,7 +153,11 @@ pub fn show(
             ui.add(egui::Slider::new(&mut settings.refresh_ms, 100..=5000));
 
             ui.add_space(spacing.xs);
-            ui.checkbox(&mut settings.confirm_remove, "Confirm before removing");
+            ui.checkbox(&mut settings.confirm_remove, "Confirm destructive actions")
+                .on_hover_text(
+                    "Ask before removing downloads or restarting one from scratch; \
+                     the dialog always names the consequence",
+                );
             ui.checkbox(
                 &mut settings.purge_on_remove,
                 "Delete files too when removing",

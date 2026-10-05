@@ -10,6 +10,7 @@ use egui::{Align, Layout, RichText, Ui};
 
 use crate::state::{GuiState, UiAction, ALL_STATES};
 use crate::theme::{self, components, Breakpoints, LayoutMode, Sizes, Spacing};
+use crate::ux::{self, BulkAction};
 
 pub fn show(
     ui: &mut Ui,
@@ -32,25 +33,25 @@ pub fn show(
         }
         ui.separator();
         if ui
-            .button("⏸ Pause all")
-            .on_hover_text("rdm pause <ID> for every active transfer")
+            .button(format!("⏸ {}", BulkAction::PauseAll))
+            .on_hover_text(ux::pause_all_tooltip())
             .clicked()
         {
             actions.push(UiAction::PauseAll);
         }
         if ui
-            .button("▶ Resume all")
-            .on_hover_text("rdm resume <ID> for every paused/interrupted/failed transfer")
+            .button(format!("▶ {}", BulkAction::ResumeAll))
+            .on_hover_text(ux::resume_all_tooltip())
             .clicked()
         {
             actions.push(UiAction::ResumeAll);
         }
         if ui
-            .button("🗑 Clear completed")
-            .on_hover_text("rdm remove <ID> for every completed record")
+            .button(format!("🗑 {}", BulkAction::RemoveCompleted))
+            .on_hover_text(ux::remove_completed_tooltip())
             .clicked()
         {
-            actions.push(UiAction::RemoveCompleted);
+            actions.push(UiAction::AskRemoveCompleted);
         }
         ui.separator();
         if ui
@@ -70,9 +71,13 @@ pub fn show(
                     .small()
                     .color(palette.warning),
             )
-            .on_hover_text("Waiting for a free slot — open the Queue sidebar");
-            if ui.small_button("Clear queue").clicked() {
-                actions.push(UiAction::ClearQueue);
+            .on_hover_text("Queued downloads wait for a free slot — open the Queue sidebar (☰)");
+            if ui
+                .small_button(format!("{}", BulkAction::DropQueue))
+                .on_hover_text(ux::drop_queue_tooltip())
+                .clicked()
+            {
+                actions.push(UiAction::DropQueue);
             }
         }
 
@@ -140,6 +145,8 @@ pub fn show(
                 &palette,
                 "Enter: details · ↑/↓: select · Ctrl+F: search",
             );
+            ui.label(RichText::new("ⓘ").small().color(palette.text_muted))
+                .on_hover_text(ux::legend_tooltip());
         }
     });
 
