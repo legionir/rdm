@@ -2,7 +2,7 @@ rdm — UX terminology & microcopy check
 root: /home/user/rdm
 
 == 1. Preferred terminology ==
-  [ok] no banned terminology in 11 user-facing files
+  [ok] no banned terminology in 12 user-facing files
 
 == 2. Destructive actions: confirmation + consequence copy ==
   [ok] Remove download: confirmed in rdm-gui/src/app.rs::confirm_dialog

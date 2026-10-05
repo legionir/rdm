@@ -9,9 +9,9 @@ contract: 8 roles × surfaces, 8 surfaces, 2 themes
   [ok] light: focus ring visible on all 8 surfaces
 
 == 3/4. Token discipline in the views ==
-  [ok] 8 UI files: no colour literals, all use `theme::`
+  [ok] 9 UI files: no colour literals, all use `theme::`
 
 == 5. Static sanity of the changed Rust files ==
-  [ok] 19 Rust files: delimiters balanced
+  [ok] 21 Rust files: delimiters balanced
 
 RESULT: PASS — all checks green
