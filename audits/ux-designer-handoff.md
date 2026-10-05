@@ -8,9 +8,11 @@
   [`ux-usability-evaluation.md`](ux-usability-evaluation.md)
 - **Required actions:** review/approve against the usability criteria, record the state, then
   answer the open questions in §7 of the flows document
-- **Branch / commit:** `arena/01a10cef-rdm` @ `15cf0ed`; final CI run
-  [37357552644](https://github.com/legionir/rdm/actions/runs/37357552644) — `Build GUI binary` ✓,
-  `Test GUI crate` ✓, `test-windows` (CLI regression) ✓. Increment history:
+- **Branch / commit:** `arena/01a10cef-rdm` @ `58cf277` (audit trail) with the closure code head
+  `15cf0ed`. CI: **code head** [37357552644](https://github.com/legionir/rdm/actions/runs/37357552644)
+  ✓ and **audit-trail head** [37358274886](https://github.com/legionir/rdm/actions/runs/37358274886)
+  ✓ — `Build GUI binary` ✓, `Test GUI crate` ✓, `test-windows` (CLI regression) ✓ in both.
+  Documentation-only commits after `58cf277` re-run the same unchanged jobs. Increment history:
   [`37350073234`](https://github.com/legionir/rdm/actions/runs/37350073234) @ `3eb2def` (first
   code-green run) → [`37350848407`](https://github.com/legionir/rdm/actions/runs/37350848407) @
   `47253af` (docs) → **closure increment** `4de6f1c`/`df5c77f`/`15cf0ed` → run above
@@ -320,8 +322,9 @@ builds/tests fail), documented, and escalated to the responsible persona.
 ## 9. Pull request
 
 PR [#8](https://github.com/legionir/rdm/pull/8) (`arena/01a10cef-rdm` → `main`) carries the UI and
-UX increments; the closure increment is pushed to the same branch. CI on the current head:
-run [37357552644](https://github.com/legionir/rdm/actions/runs/37357552644) — all jobs ✓.
+UX increments; the closure increment is pushed to the same branch. CI on the current heads:
+run [37357552644](https://github.com/legionir/rdm/actions/runs/37357552644) (`15cf0ed`) and run
+[37358274886](https://github.com/legionir/rdm/actions/runs/37358274886) (`58cf277`) — all jobs ✓.
 
 ## 10. Execution Result
 
