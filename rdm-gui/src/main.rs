@@ -19,6 +19,7 @@ mod settings;
 mod state;
 mod theme;
 mod util;
+mod ux;
 mod views;
 
 use std::path::PathBuf;
