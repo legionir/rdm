@@ -34,6 +34,12 @@ pub struct AppSettings {
     pub dark_mode: bool,
     /// Verbosity of the captured engine log (`off`..`trace`), like `-v/-vv/-vvv`.
     pub log_level: String,
+    /// Pre-fill the URL field from the clipboard when it holds a link.
+    pub clipboard_prefill: bool,
+    /// Closing the window hides it into the tray instead of quitting.
+    pub close_to_tray: bool,
+    /// Show the floating drop target above the taskbar clock area.
+    pub drop_target_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -53,6 +59,9 @@ impl Default for AppSettings {
             purge_on_remove: false,
             dark_mode: true,
             log_level: "info".to_string(),
+            clipboard_prefill: true,
+            close_to_tray: true,
+            drop_target_enabled: false,
         }
     }
 }
@@ -95,6 +104,12 @@ impl AppSettings {
         out.push_str(&format!("purge_on_remove = {}\n", self.purge_on_remove));
         out.push_str(&format!("dark_mode = {}\n", self.dark_mode));
         out.push_str(&format!("log_level = \"{}\"\n", escape(&self.log_level)));
+        out.push_str(&format!("clipboard_prefill = {}\n", self.clipboard_prefill));
+        out.push_str(&format!("close_to_tray = {}\n", self.close_to_tray));
+        out.push_str(&format!(
+            "drop_target_enabled = {}\n",
+            self.drop_target_enabled
+        ));
         out
     }
 
@@ -109,7 +124,7 @@ impl AppSettings {
                 continue;
             };
             let key = key.trim();
-            let value = value.trim().trim_matches('"').trim();
+            let value = unescape(value.trim());
             match key {
                 "data_dir" => s.data_dir = value.to_string(),
                 // `download_dir` is the historical name; keep both spellings.
@@ -137,10 +152,13 @@ impl AppSettings {
                 "purge_on_remove" => s.purge_on_remove = value == "true",
                 "dark_mode" => s.dark_mode = value == "true",
                 "log_level" | "verbosity" => {
-                    if crate::logging::LEVELS.contains(&value) {
-                        s.log_level = value.to_string();
+                    if crate::logging::LEVELS.contains(&value.as_str()) {
+                        s.log_level = value;
                     }
                 }
+                "clipboard_prefill" => s.clipboard_prefill = truthy(&value),
+                "close_to_tray" => s.close_to_tray = truthy(&value),
+                "drop_target_enabled" => s.drop_target_enabled = truthy(&value),
                 _ => {}
             }
         }
@@ -148,8 +166,47 @@ impl AppSettings {
     }
 }
 
+/// Only characters that break the `key = "value"` form are escaped.
+///
+/// Backslashes are **not** escaped on purpose: every path in this file is a
+/// Windows path (`C:\downloads`), and the previous symmetric
+/// `replace('\\', "\\\\")` had no matching decoder, so each save/load cycle
+/// doubled every backslash (the reported `C:\\\\download\\\\rdm` bug).
 fn escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
+    value.replace('\n', "\\n").replace('\t', "\\t").replace('"', "\\\"")
+}
+
+/// The inverse of [`escape`], accepting both quoted and bare values.
+fn unescape(value: &str) -> String {
+    let value = value.trim();
+    let inner = match value.strip_prefix('"') {
+        Some(rest) => rest.strip_suffix('"').unwrap_or(rest),
+        None => value,
+    };
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('"') => out.push('"'),
+            // A stray backslash (the normal case for Windows paths) is kept.
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+fn truthy(value: &str) -> bool {
+    matches!(value.trim().to_ascii_lowercase().as_str(), "true" | "yes" | "1" | "on")
 }
 
 /// Loads the settings file and notices external edits (hot reload).
@@ -157,16 +214,26 @@ pub struct SettingsStore {
     path: PathBuf,
     last_modified: Option<SystemTime>,
     settings: AppSettings,
+    /// `--data-dir` from the command line: it wins over the saved value and is
+    /// never written back to the file (the flag describes this run, not the
+    /// user's preference).
+    cli_data_dir: Option<String>,
 }
 
 impl SettingsStore {
-    pub fn new(data_dir: &Path) -> Self {
+    /// `data_dir` is the directory this run uses; `explicit` says whether it
+    /// came from `--data-dir` (then it outranks the saved value).
+    pub fn new(data_dir: &Path, explicit: bool) -> Self {
         let mut store = SettingsStore {
             path: data_dir.join(SETTINGS_FILE),
             last_modified: None,
             settings: AppSettings::default(),
+            cli_data_dir: None,
         };
         store.settings.data_dir = data_dir.display().to_string();
+        if explicit {
+            store.cli_data_dir = Some(data_dir.display().to_string());
+        }
         store.load();
         store
     }
@@ -188,11 +255,26 @@ impl SettingsStore {
         if let Ok(content) = std::fs::read_to_string(&self.path) {
             self.settings = AppSettings::parse(&content);
         }
+        // A command-line directory always wins, for every later reload too.
+        if let Some(cli) = &self.cli_data_dir {
+            self.settings.data_dir = cli.clone();
+        }
     }
 
     pub fn save(&mut self) -> std::io::Result<()> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
+        }
+        // The file belongs to the directory it lives in; writing the
+        // process-relative default back would silently move the next start.
+        if let Some(cli) = &self.cli_data_dir {
+            self.settings.data_dir = cli.clone();
+        } else if self.settings.data_dir.is_empty() {
+            self.settings.data_dir = self
+                .path
+                .parent()
+                .map(|dir| dir.display().to_string())
+                .unwrap_or_else(|| self.settings.data_dir.clone());
         }
         std::fs::write(&self.path, self.settings.serialize())?;
         self.last_modified = modified_at(&self.path);
@@ -210,11 +292,14 @@ impl SettingsStore {
         }
     }
 
-    /// Re-target the store after the data dir changed.
+    /// Re-target the store after the data dir changed *in the UI*; that choice
+    /// becomes the new preference (the CLI override no longer applies).
     pub fn relocate(&mut self, data_dir: &Path) {
         self.path = data_dir.join(SETTINGS_FILE);
         self.last_modified = None;
+        self.cli_data_dir = None;
         self.load();
+        self.settings.data_dir = data_dir.display().to_string();
     }
 }
 
@@ -259,6 +344,79 @@ mod tests {
         assert_eq!(parsed.connections, 128);
         assert_eq!(parsed.refresh_ms, 100);
         assert_eq!(parsed.log_level, "info");
+    }
+
+    #[test]
+    fn windows_paths_survive_any_number_of_round_trips() {
+        // The reported bug: `C:\download\rdm` came back as `C:\\download\\rdm`.
+        let mut settings = AppSettings::default();
+        settings.data_dir = r"C:\download\rdm".to_string();
+        settings.download_dir = r"C:\download\rdm\finished".to_string();
+
+        let text = settings.serialize();
+        let mut current = AppSettings::parse(&text);
+        assert_eq!(current, settings, "first read");
+        assert!(
+            !text.contains(r"\\"),
+            "no doubled backslashes may be written:\n{text}"
+        );
+
+        for round in 0..5 {
+            let text = current.serialize();
+            current = AppSettings::parse(&text);
+            assert_eq!(current, settings, "round trip {}", round + 1);
+            assert!(!text.contains(r"\\"), "round {} doubled a backslash", round + 1);
+        }
+    }
+
+    #[test]
+    fn quotes_and_newlines_still_escape_correctly() {
+        let mut settings = AppSettings::default();
+        settings.user_agent = "rdm \"quoted\" agent".to_string();
+        let parsed = AppSettings::parse(&settings.serialize());
+        assert_eq!(parsed.user_agent, settings.user_agent);
+
+        let parsed = AppSettings::parse("download_dir = D:\\iso\\files\nclose_to_tray = true\n");
+        assert_eq!(parsed.download_dir, r"D:\iso\files");
+        assert!(parsed.close_to_tray);
+    }
+
+    #[test]
+    fn the_new_switches_default_to_on_and_parse() {
+        let defaults = AppSettings::default();
+        assert!(defaults.clipboard_prefill);
+        assert!(defaults.close_to_tray);
+        assert!(!defaults.drop_target_enabled, "opt-in: it adds a window");
+
+        let parsed = AppSettings::parse(
+            "clipboard_prefill = false\nclose_to_tray = false\ndrop_target_enabled = true\n",
+        );
+        assert!(!parsed.clipboard_prefill);
+        assert!(!parsed.close_to_tray);
+        assert!(parsed.drop_target_enabled);
+        // Bare boolean forms from hand editing are accepted too.
+        assert!(AppSettings::parse("close_to_tray = yes\n").close_to_tray);
+        assert!(AppSettings::parse("close_to_tray = 1\n").close_to_tray);
+    }
+
+    #[test]
+    fn a_command_line_data_dir_is_not_written_back_or_overridden() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(SETTINGS_FILE),
+            "data_dir = \"C:\\\\elsewhere\"\nconnections = 4\n",
+        )
+        .unwrap();
+        let mut store = SettingsStore::new(dir.path(), true);
+        assert_eq!(store.settings().data_dir, dir.path().display().to_string());
+        assert_eq!(store.settings().connections, 4, "other keys still load");
+        store.settings_mut().connections = 6;
+        store.save().unwrap();
+        let written = std::fs::read_to_string(dir.path().join(SETTINGS_FILE)).unwrap();
+        assert!(
+            written.contains(&format!("data_dir = \"{}\"", dir.path().display())),
+            "the flag value is what the file must keep:\n{written}"
+        );
     }
 
     #[test]

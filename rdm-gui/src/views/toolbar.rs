@@ -26,7 +26,7 @@ pub fn show(
 
     ui.horizontal_wrapped(|ui| {
         if components::primary_button(ui, "➕  New download")
-            .on_hover_text("rdm download <URL> …")
+            .on_hover_text(ux::new_download_tooltip(state.prefill_from_clipboard))
             .clicked()
         {
             actions.push(UiAction::OpenAddDialog);

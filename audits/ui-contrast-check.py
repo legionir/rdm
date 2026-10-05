@@ -116,7 +116,9 @@ def delimiter_balance(src: str) -> str | None:
             while i < n and src[i] != '"':
                 i += 2 if src[i] == "\\" else 1
         elif ch == "'" and i + 2 < n and (src[i + 2] == "'" or (src[i + 1] == "\\")):
-            i += 4 if src[i + 1] == "\\" else 2
+            # A char literal is 3 chars (`'x'`) or 4 with an escape (`'\\n'`);
+            # the loop below adds the final +1, so skip len-1 here.
+            i += 3 if src[i + 1] == "\\" else 2
         elif ch in "([{":
             stack.append(ch)
         elif ch in ")]}":
@@ -252,12 +254,17 @@ def main() -> int:
     say("")
     say("== 5. Static sanity of the changed Rust files ==")
     changed = sorted(gui.rglob("*.rs"))
+    unbalanced = 0
     for path in changed:
         problem = delimiter_balance(path.read_text())
         if problem:
             say(f"  FAIL {path.relative_to(root)}: {problem}")
             failures += 1
-    say(f"  [ok] {len(changed)} Rust files: delimiters balanced")
+            unbalanced += 1
+    if unbalanced == 0:
+        say(f"  [ok] {len(changed)} Rust files: delimiters balanced")
+    else:
+        say(f"  [--] {unbalanced}/{len(changed)} Rust files failed the delimiter check")
 
     say("")
     say("RESULT: " + ("PASS — all checks green" if failures == 0

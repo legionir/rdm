@@ -398,6 +398,26 @@ pub fn resume_all_tooltip() -> &'static str {
     "Continue every paused, interrupted or cancelled download (rdm resume <ID>)"
 }
 
+/// Tooltip of the URL field: what the field accepts and where the value can
+/// come from.
+pub const URL_FIELD_HINT: &str = "A link starting with http:// or https:// — copied from your browser, \
+dropped on the window, or filled in from the clipboard";
+
+/// Tooltip for the *New download* toolbar button: the clipboard rule is worth
+/// saying out loud, because it is the fastest path in the app.
+pub fn new_download_tooltip(prefill: bool) -> &'static str {
+    if prefill {
+        "New download — a link on the clipboard is filled in automatically"
+    } else {
+        "New download — paste a link (or turn on “Fill the URL from the clipboard”)"
+    }
+}
+
+/// What the status bar says when a drop target link is accepted.
+pub fn drop_accepted(url: &str) -> String {
+    format!("Link accepted — the New download form opened with {url}")
+}
+
 /// Tip shown in the New download dialog: where the filename comes from.
 pub const ADD_TIP: &str = "Tip: choose a folder in “Output” to keep the server-provided filename.";
 
@@ -475,6 +495,10 @@ mod tests {
             open_folder_tooltip(),
             remove_completed_tooltip(),
             drop_queue_tooltip(),
+            new_download_tooltip(true),
+            new_download_tooltip(false),
+            drop_accepted("https://example.com/x.zip"),
+            URL_FIELD_HINT,
             ADD_TIP,
             resume_all_tooltip(),
             pause_all_tooltip(),
@@ -543,6 +567,17 @@ mod tests {
         let nothing = resume_all_outcome(0, 1);
         assert!(nothing.starts_with("Nothing to continue"), "{nothing}");
         assert!(nothing.contains("1 failed download(s)"));
+    }
+
+    #[test]
+    fn the_clipboard_shortcut_is_described_in_the_tooltip_it_changes() {
+        let on = new_download_tooltip(true);
+        let off = new_download_tooltip(false);
+        assert!(on.contains("filled in automatically"), "{on}");
+        assert!(off.contains("turn on"), "{off}");
+        assert_ne!(on, off);
+        // The drop confirmation names the link, so a surprise import is traceable.
+        assert!(drop_accepted("https://example.com/a.zip").contains("https://example.com/a.zip"));
     }
 
     #[test]

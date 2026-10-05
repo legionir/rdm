@@ -56,6 +56,9 @@ UI_FILES = [
     "rdm-gui/src/views/download_list.rs",
     "rdm-gui/src/views/footer.rs",
     "rdm-gui/src/views/help_overlay.rs",
+    "rdm-gui/src/tray.rs",
+    "rdm-gui/src/dropzone.rs",
+    "rdm-gui/src/ux.rs",
     "rdm-gui/src/views/queue_sidebar.rs",
     "rdm-gui/src/views/settings_view.rs",
     "rdm-gui/src/views/toolbar.rs",
@@ -73,7 +76,7 @@ DESTRUCTIVE = {
     "Remove completed": ("rdm-gui/src/app.rs", "remove_completed_now"),
     "Restart from scratch": ("rdm-gui/src/app.rs", "restart_now"),
     "Drop one queued download": ("rdm-gui/src/app.rs", None),  # nothing downloaded yet
-    "Drop all queued downloads": ("rdm-gui/src/app.rs", None),
+    "Drop all queued downloads": ("rdm-gui/src/app.rs", "drop_queue_now"),
 }
 
 # The consequence copy lives in the UX policy module; these literals must be
@@ -90,6 +93,7 @@ REQUIRED_WIRING = [
     ("rdm-gui/src/app.rs", "AskRemoveCompleted", "the bulk remove asks first"),
     ("rdm-gui/src/app.rs", "AskRestart", "the restart asks first"),
     ("rdm-gui/src/app.rs", "confirm_destructive", "one switch governs the confirmations"),
+    ("rdm-gui/src/app.rs", "drop_all_confirm", "a long queue asks before it is emptied"),
 ]
 
 

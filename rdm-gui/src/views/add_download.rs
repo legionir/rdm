@@ -20,6 +20,11 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
     let sizes = Sizes::default();
     let spacing = Spacing::default();
     let edit_margin = egui::Margin::symmetric(spacing.sm, spacing.xs);
+    // Set when the window was opened from the tray/drop target or pre-filled
+    // from the clipboard: put the caret in the URL field with the link
+    // selected, so typing replaces it and Enter starts the download.
+    let focus_url = std::mem::take(&mut state.focus_url);
+    let url_field = egui::Id::new("rdm-new-url");
 
     egui::Window::new("New download")
         .open(&mut open)
@@ -33,13 +38,27 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                 .spacing(sizes.form_spacing)
                 .min_col_width(sizes.form_label_width)
                 .show(ui, |ui| {
-                    ui.label("URL");
-                    ui.add(
+                    ui.label("URL").on_hover_text(ux::URL_FIELD_HINT);
+                    let url = ui.add(
                         egui::TextEdit::singleline(&mut state.form.url)
+                            .id(url_field)
                             .hint_text("https://example.com/file.zip")
                             .margin(edit_margin)
                             .desired_width(sizes.edit_wide),
                     );
+                    if focus_url {
+                        url.request_focus();
+                        // Select the whole link: the next keystroke replaces it.
+                        if let Some(mut edit) = egui::text_edit::TextEditState::load(ctx, url_field)
+                        {
+                            let end = state.form.url.chars().count();
+                            edit.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(end),
+                            )));
+                            edit.store(ctx, url_field);
+                        }
+                    }
                     ui.end_row();
 
                     ui.label("Output")

@@ -164,6 +164,32 @@ pub fn show(
             );
             ui.checkbox(&mut settings.dark_mode, "Dark theme");
 
+            ui.add_space(spacing.sm);
+            ui.separator();
+            ui.label("Desktop integration").strong();
+            ui.checkbox(
+                &mut settings.clipboard_prefill,
+                "Fill the URL from the clipboard",
+            )
+            .on_hover_text(
+                "When “New download” opens, a link on the clipboard is inserted \
+                 and selected, so Start (or Enter) begins it immediately",
+            );
+            ui.checkbox(&mut settings.close_to_tray, "Keep running in the tray")
+                .on_hover_text(
+                    "Closing the window hides it instead of quitting; the transfer \
+                     keeps running and the tray menu brings it back. The tray's \
+                     “Quit rdm” really exits",
+                );
+            ui.checkbox(
+                &mut settings.drop_target_enabled,
+                "Floating drop target",
+            )
+            .on_hover_text(
+                "A small always-on-top box above the taskbar clock: drop a link \
+                 on it (from a browser) and the New download form opens with it",
+            );
+
             ui.add_space(spacing.md);
             ui.label("Engine log verbosity")
                 .on_hover_text("Same levels as the CLI's -v / -vv / -vvv; RUST_LOG still wins");

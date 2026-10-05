@@ -13,7 +13,11 @@ use egui::Context;
 use rdm::models::DownloadState;
 
 use crate::backend::{Backend, BackendEvent};
+use crate::clipboard;
+use crate::dropzone::DropZone;
 use crate::logging::LogControl;
+use crate::platform::ImportBus;
+use crate::tray::{Tray, TrayCommand};
 use crate::settings::SettingsStore;
 use crate::state::{DetailTab, FooterPanel, GuiState, PendingConfirm, UiAction};
 use crate::theme::{self, components, Sizes, Spacing};
@@ -32,22 +36,35 @@ pub struct RdmGuiApp {
     logging: Option<LogControl>,
     log_level: String,
     shutting_down: bool,
+    /// Tray icon; `None` in a session without a tray host (also CI).
+    tray: Option<Tray>,
+    /// Links arriving from the tray or the drop target.
+    imports: ImportBus,
+    /// The floating drop target (“floating bottom”).
+    drop_zone: DropZone,
+    /// Set while the drop target should be on screen, mirrored into the settings.
+    drop_target_shown: bool,
+    /// `true` once “Quit” was chosen from the tray: the window close is then a
+    /// real exit instead of another hide.
+    quit_requested: bool,
+    /// Ask the viewport to come back to the foreground (tray/import).
+    reveal_requested: bool,
 }
 
 impl RdmGuiApp {
     pub fn new(
         data_dir: PathBuf,
+        data_dir_explicit: bool,
         logging: Option<LogControl>,
         forced_level: Option<&'static str>,
     ) -> anyhow::Result<Self> {
         let backend = Backend::new(&data_dir)?;
-        let mut settings = SettingsStore::new(&data_dir);
-        // The command line wins over whatever the file says.
-        settings.settings_mut().data_dir = data_dir.display().to_string();
+        let settings = SettingsStore::new(&data_dir, data_dir_explicit);
         let state = GuiState::new(
             settings.settings().to_request(),
             data_dir.display().to_string(),
         );
+        let drop_target_shown = settings.settings().drop_target_enabled;
         let mut app = RdmGuiApp {
             backend,
             settings,
@@ -60,6 +77,12 @@ impl RdmGuiApp {
             logging,
             log_level: String::new(),
             shutting_down: false,
+            tray: None,
+            imports: ImportBus::new(),
+            drop_zone: DropZone::new(),
+            drop_target_shown,
+            quit_requested: false,
+            reveal_requested: false,
         };
         // A `-v` flag on the command line wins over the settings file.
         let level = match forced_level {
@@ -74,6 +97,15 @@ impl RdmGuiApp {
             "info",
             format!("metadata database: {}", app.backend.db_path().display()),
         );
+
+        // Tray: absent in sessions without a tray host; the app then closes
+        // normally instead of hiding into a tray that is not there.
+        app.tray = Tray::new(app.drop_target_shown);
+        if app.tray.is_none() {
+            app.state
+                .push_log("warn", "no system tray available — closing the window will quit");
+        }
+
         app.refresh(true);
         Ok(app)
     }
@@ -173,9 +205,23 @@ impl RdmGuiApp {
             UiAction::OpenAddDialog => {
                 let mut form = self.settings.settings().to_request();
                 form.url = self.state.form.url.clone();
+                // “Copy a link, press New”: the clipboard fills the field when
+                // the switch is on (Settings → Application).
+                let mut prefilled = false;
+                if self.settings.settings().clipboard_prefill {
+                    if let Some(link) = clipboard::url() {
+                        form.url = link;
+                        prefilled = true;
+                    }
+                }
                 self.state.form = form;
                 self.state.form_error = None;
                 self.state.show_add = true;
+                self.state.focus_url = prefilled;
+                if prefilled {
+                    self.state
+                        .push_log("info", "URL filled in from the clipboard");
+                }
             }
             UiAction::SubmitNewDownload => {
                 let request = self.state.form.clone();
@@ -375,6 +421,133 @@ impl RdmGuiApp {
             }
             UiAction::ClearLog => self.state.log.clear(),
         }
+    }
+
+    /// React to the tray menu / icon.
+    fn poll_tray(&mut self, _ctx: &Context) {
+        // Commands are copied out first: handling them mutates the app, which
+        // would otherwise conflict with the borrow of `self.tray`.
+        let commands = match &self.tray {
+            Some(tray) => tray.poll(),
+            None => return,
+        };
+        for command in commands {
+            match command {
+                TrayCommand::Show => self.reveal_requested = true,
+                TrayCommand::Quit => {
+                    self.quit_requested = true;
+                    _ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                TrayCommand::PauseAll => match self.backend.pause_all() {
+                    Ok(0) => self
+                        .state
+                        .push_log("info", BulkAction::PauseAll.nothing_to_do()),
+                    Ok(n) => self.state.push_log("info", BulkAction::PauseAll.done(n)),
+                    Err(err) => self.state.push_log("error", format!("{err:#}")),
+                },
+                TrayCommand::ResumeAll => {
+                    let defaults = self.settings.settings().to_request();
+                    let limit = self.max_concurrent();
+                    match self.backend.resume_all(&defaults, limit) {
+                        Ok(n) => {
+                            let needs_restart = self
+                                .state
+                                .downloads
+                                .iter()
+                                .filter(|r| r.state == DownloadState::Failed)
+                                .count();
+                            self.state
+                                .push_log("info", ux::resume_all_outcome(n, needs_restart));
+                        }
+                        Err(err) => self.state.push_log("error", format!("{err:#}")),
+                    }
+                }
+                TrayCommand::ToggleDropTarget => {
+                    self.drop_target_shown = !self.drop_target_shown;
+                    self.settings.settings_mut().drop_target_enabled = self.drop_target_shown;
+                    if let Err(err) = self.settings.save() {
+                        self.state
+                            .push_log("error", format!("cannot save the setting: {err}"));
+                    }
+                    self.state.push_log(
+                        "info",
+                        if self.drop_target_shown {
+                            "floating drop target shown above the taskbar clock"
+                        } else {
+                            "floating drop target hidden"
+                        },
+                    );
+                }
+                TrayCommand::NewDownload => {
+                    // The clipboard is the whole point of this entry: copy a
+                    // link, pick it from the tray, fill the form.
+                    let prefilled = if self.settings.settings().clipboard_prefill {
+                        clipboard::url()
+                    } else {
+                        None
+                    };
+                    if prefilled.is_none() {
+                        self.state.push_log(
+                            "info",
+                            "no link on the clipboard — opening the form empty",
+                        );
+                    }
+                    self.open_new_download(prefilled);
+                }
+            }
+        }
+        // The menu check mark follows the setting, whatever changed it.
+        if let Some(tray) = &self.tray {
+            tray.set_drop_target_shown(self.drop_target_shown);
+        }
+    }
+
+    /// Links dropped on the floating target or on the window (queued by the
+    /// drop target, or pushed by the tray). Opening the form also brings the
+    /// window back from the tray.
+    fn drain_imports(&mut self, _ctx: &Context) {
+        let urls: Vec<String> = self
+            .imports
+            .drain()
+            .into_iter()
+            .chain(self.drop_zone.drain())
+            .collect();
+        if urls.is_empty() {
+            return;
+        }
+        let last = urls.len();
+        for url in urls {
+            if last == 1 {
+                self.state.push_log(
+                    "info",
+                    format!("Dropped link — starting the form for {url}"),
+                );
+            }
+            self.open_new_download(Some(url));
+        }
+    }
+
+    /// Show the form, optionally pre-filled, and bring the window forward.
+    fn open_new_download(&mut self, url: Option<String>) {
+        let mut form = self.settings.settings().to_request();
+        form.url = url.unwrap_or_default();
+        self.state.form = form;
+        self.state.form_error = None;
+        self.state.show_add = true;
+        self.state.focus_url = true;
+        self.reveal_requested = true;
+    }
+
+    /// Keep the floating drop target on screen while the setting is on.
+    fn sync_drop_target(&mut self, ctx: &Context) {
+        if !self.drop_target_shown {
+            return;
+        }
+        if self.drop_zone.take_activation() {
+            self.reveal_requested = true;
+        }
+        self.drop_zone.set_dark(self.settings.settings().dark_mode);
+        self.drop_zone.show(ctx);
     }
 
     /// Does a destructive action ask before acting? Default: yes.
@@ -612,6 +785,9 @@ impl eframe::App for RdmGuiApp {
 
         self.drain_backend_events();
         self.drain_engine_logs();
+        self.poll_tray(ctx);
+        self.drain_imports(ctx);
+        self.sync_drop_target(ctx);
         let wanted_level = self.settings.settings().log_level.clone();
         if wanted_level != self.log_level {
             self.set_log_level(&wanted_level);
@@ -625,6 +801,26 @@ impl eframe::App for RdmGuiApp {
         }
 
         self.handle_shortcuts(ctx);
+
+        // The setting is the source of truth; the mirror is what the viewport
+        // code reads, and the tray menu shows the same state.
+        self.state.prefill_from_clipboard = self.settings.settings().clipboard_prefill;
+        let wanted_target = self.settings.settings().drop_target_enabled;
+        if wanted_target != self.drop_target_shown {
+            self.drop_target_shown = wanted_target;
+            if let Some(tray) = &self.tray {
+                tray.set_drop_target_shown(wanted_target);
+            }
+        }
+        if self.drop_zone.take_hide_request() {
+            self.drop_target_shown = false;
+            self.settings.settings_mut().drop_target_enabled = false;
+            let _ = self.settings.save();
+            self.state.push_log(
+                "info",
+                "floating drop target hidden — turn it back on in Settings",
+            );
+        }
 
         let mut actions: Vec<UiAction> = Vec::new();
         let active_jobs = self.backend.active_jobs();
@@ -700,17 +896,54 @@ impl eframe::App for RdmGuiApp {
         actions.extend(crate::views::help_overlay::show(ctx, &mut self.state));
         actions.extend(self.confirm_dialog(ctx));
 
+        // Files or links dropped on the main window take the same path as the
+        // floating target: they open the form, pre-filled.
+        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        if !dropped.is_empty() {
+            for report in util::dropped_links(&dropped) {
+                self.state.push_log("info", report.note);
+                if let Some(url) = report.url {
+                    self.imports.push(url);
+                }
+            }
+            self.reveal_requested = true;
+            self.drain_imports(ctx);
+        }
+
         for action in actions {
             self.apply(action, ctx);
         }
 
+        // Closing the window: with a tray available and the setting on, the
+        // app keeps running there (transfers included) instead of quitting.
         if ctx.input(|i| i.viewport().close_requested()) && !self.shutting_down {
-            self.shutting_down = true;
-            let asked = self.backend.shutdown(Duration::from_secs(5));
-            if asked > 0 {
-                self.state
-                    .push_log("warn", format!("paused {asked} running download(s) on exit"));
+            let hide = self.settings.settings().close_to_tray
+                && self.tray.is_some()
+                && !self.quit_requested;
+            if hide {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                self.state.push_log(
+                    "info",
+                    "window hidden — rdm keeps running in the tray (Quit there to exit)",
+                );
+            } else {
+                self.shutting_down = true;
+                let asked = self.backend.shutdown(Duration::from_secs(5));
+                if asked > 0 {
+                    self.state
+                        .push_log("warn", format!("paused {asked} running download(s) on exit"));
+                }
             }
+        }
+
+        if self.reveal_requested {
+            self.reveal_requested = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                egui::viewport::UserAttentionType::Informational,
+            ));
         }
 
         // Keep the window live while transfers are in flight.

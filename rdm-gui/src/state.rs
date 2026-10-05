@@ -189,6 +189,11 @@ pub struct GuiState {
     pub footer_panel: Option<FooterPanel>,
     /// Whether the in-app help overlay is visible (`F1`).
     pub show_help: bool,
+    /// The *New download* field should get the caret (set by the tray/drop
+    /// target or when the URL was pre-filled from the clipboard).
+    pub focus_url: bool,
+    /// Mirror of *Fill the URL from the clipboard*; the toolbar text follows it.
+    pub prefill_from_clipboard: bool,
     /// Whether the settings sidebar is visible (toggled from the top menu).
     pub show_settings: bool,
     /// Whether the queue sidebar is visible (toggled from the top menu).
@@ -228,6 +233,8 @@ impl GuiState {
             detail_tab: DetailTab::Overview,
             footer_panel: None,
             show_help: false,
+            focus_url: false,
+            prefill_from_clipboard: true,
             show_settings: false,
             show_queue: false,
             chunks: Vec::new(),
