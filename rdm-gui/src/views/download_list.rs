@@ -143,7 +143,8 @@ pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
             components::hint(
                 ui,
                 &palette,
-                "Nothing here yet — press “New download” to add your first download.",
+                "Nothing here yet — press “New download” and paste a URL to start your first \
+                 download. Press F1 for what the states mean.",
             );
             ui.add_space(spacing.xxl);
         });

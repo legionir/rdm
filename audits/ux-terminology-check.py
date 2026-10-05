@@ -55,6 +55,7 @@ UI_FILES = [
     "rdm-gui/src/views/details_modal.rs",
     "rdm-gui/src/views/download_list.rs",
     "rdm-gui/src/views/footer.rs",
+    "rdm-gui/src/views/help_overlay.rs",
     "rdm-gui/src/views/queue_sidebar.rs",
     "rdm-gui/src/views/settings_view.rs",
     "rdm-gui/src/views/toolbar.rs",

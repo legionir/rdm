@@ -494,8 +494,13 @@ fn report(outcome: EngineOutcome) -> Result<u8> {
             Ok(0)
         }
         DownloadState::Failed => {
+            // The state is terminal for `resume` (see `run_resume`), so pointing
+            // the user at `rdm resume` would send them into an error. The
+            // recovery that works is starting over; the partial data names the
+            // exact continuation command where the engine supports one.
             println!(
-                "{} — failed at {}; run `rdm resume {}` after fixing the issue",
+                "{} — failed at {}. Run `rdm download --force <URL> --output <PATH>` to start it \
+                 over; `rdm resume {}` refuses a failed download.",
                 outcome.public_id,
                 human::human_bytes(outcome.bytes),
                 outcome.public_id

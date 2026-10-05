@@ -31,14 +31,17 @@ pub enum Confirm {
     RemoveCompleted,
     /// Download again from the beginning.
     Restart,
+    /// Bulk drop of a long queue (see [`DROP_ALL_CONFIRM_THRESHOLD`]).
+    DropAll,
 }
 
 impl Confirm {
-    pub const ALL: [Confirm; 4] = [
+    pub const ALL: [Confirm; 5] = [
         Confirm::None,
         Confirm::RemoveOne,
         Confirm::RemoveCompleted,
         Confirm::Restart,
+        Confirm::DropAll,
     ];
 
     /// Window title.
@@ -48,6 +51,7 @@ impl Confirm {
             Confirm::RemoveOne => "Remove download",
             Confirm::RemoveCompleted => "Remove completed downloads",
             Confirm::Restart => "Restart from scratch",
+            Confirm::DropAll => "Drop all queued downloads",
         }
     }
 
@@ -58,6 +62,7 @@ impl Confirm {
             Confirm::RemoveOne => "Remove",
             Confirm::RemoveCompleted => "Remove",
             Confirm::Restart => "Restart",
+            Confirm::DropAll => "Drop them",
         }
     }
 
@@ -67,6 +72,7 @@ impl Confirm {
             Confirm::None => "",
             Confirm::RemoveOne | Confirm::RemoveCompleted => "Keep",
             Confirm::Restart => "Keep the progress",
+            Confirm::DropAll => "Keep them",
         }
     }
 
@@ -90,19 +96,42 @@ impl Confirm {
             Confirm::Restart => "This discards the progress of this download, downloads it again \
                  from the beginning and overwrites the file at the output path. Cannot be undone."
                 .to_string(),
+            Confirm::DropAll => format!(
+                "This drops {subject} queued download(s) before they start; nothing has been \
+                 downloaded yet, so no partial data is lost. You can add them again later. \
+                 Cannot be undone."
+            ),
         }
     }
 }
 
-/// Every action that destroys user data, with the confirmation it gets.
-/// Adding an action without a row here fails the unit test.
+/// Every action that destroys user data, with the strongest confirmation it
+/// asks for. Adding an action without a row here fails the unit test.
+///
+/// `Drop all` asks only above [`DROP_ALL_CONFIRM_THRESHOLD`]: dropping a queued
+/// download loses nothing that has been fetched, but silently emptying a long
+/// queue is still an easy mistake, so a long queue gets a dialog.
 pub const DESTRUCTIVE: [(&str, Confirm); 5] = [
     ("Remove one download", Confirm::RemoveOne),
     ("Remove completed downloads", Confirm::RemoveCompleted),
     ("Restart from scratch", Confirm::Restart),
     ("Drop one queued download", Confirm::None),
-    ("Drop all queued downloads", Confirm::None),
+    ("Drop all queued downloads", Confirm::DropAll),
 ];
+
+/// Queued downloads at which *Drop all* starts to ask. Below the threshold the
+/// action is immediate (nothing has been downloaded yet); at or above it the
+/// user confirms, because reparsing a long queue by hand is the real cost.
+pub const DROP_ALL_CONFIRM_THRESHOLD: usize = 5;
+
+/// The confirmation *Drop all* uses for a queue of `queued` downloads.
+pub fn drop_all_confirm(queued: usize) -> Confirm {
+    if queued >= DROP_ALL_CONFIRM_THRESHOLD {
+        Confirm::DropAll
+    } else {
+        Confirm::None
+    }
+}
 
 /// Bulk actions offered by the toolbar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +174,63 @@ impl BulkAction {
             BulkAction::DropQueue => "Nothing to drop — the queue is empty.",
         }
     }
+}
+
+/// Outcome copy for *Resume all*: it continues only what `resume()` accepts, so
+/// failed downloads are named as needing *Restart* instead of being skipped
+/// silently (the engine rejects them — see `Backend::resume`).
+pub fn resume_all_outcome(continued: usize, needs_restart: usize) -> String {
+    let mut text = if continued == 0 {
+        BulkAction::ResumeAll.nothing_to_do().to_string()
+    } else {
+        BulkAction::ResumeAll.done(continued)
+    };
+    if needs_restart > 0 {
+        text.push_str(&format!(
+            " {needs_restart} failed download(s) cannot continue — use ⟲ Restart on them."
+        ));
+    }
+    text
+}
+
+/// Keyboard shortcuts shown in the in-app help, so the map does not live only
+/// in the README and in hovering.
+pub const SHORTCUTS: [(&str, &str); 8] = [
+    ("Enter", "open the details of the selected download"),
+    ("↑ / ↓", "move the selection"),
+    ("Esc", "close the top-most window, dialog or panel"),
+    ("Ctrl+F", "focus the search box"),
+    ("F5", "refresh the list"),
+    ("F1", "open this help"),
+    ("Tab / Shift+Tab", "move between controls"),
+    ("Space", "activate the focused button or checkbox"),
+];
+
+/// One section of the in-app help: a heading and its lines.
+pub fn help_sections() -> Vec<(&'static str, Vec<String>)> {
+    vec![
+        (
+            "What the states mean",
+            LEGEND
+                .iter()
+                .map(|entry| format!("{} — {}. Next: {}", entry.state, entry.meaning, entry.next_step))
+                .collect(),
+        ),
+        (
+            "Keyboard",
+            SHORTCUTS
+                .iter()
+                .map(|(keys, what)| format!("{keys} — {what}"))
+                .collect(),
+        ),
+        (
+            "Words used by rdm",
+            GLOSSARY
+                .iter()
+                .map(|entry| format!("{} — {}", entry.term, entry.meaning))
+                .collect(),
+        ),
+    ]
 }
 
 impl fmt::Display for BulkAction {
@@ -399,6 +485,14 @@ mod tests {
             copy.push(restart_tooltip(state).to_string());
         }
         copy.push(legend_tooltip());
+        copy.push(resume_all_outcome(3, 2));
+        copy.push(resume_all_outcome(0, 2));
+        for (_, lines) in help_sections() {
+            copy.extend(lines);
+        }
+        for (keys, what) in SHORTCUTS {
+            copy.push(format!("{keys} — {what}"));
+        }
         copy
     }
 
@@ -410,18 +504,73 @@ mod tests {
             .filter(|(_, confirm)| *confirm != Confirm::None)
             .map(|(action, _)| *action)
             .collect();
-        assert_eq!(with_dialog.len(), 3, "remove, bulk remove and restart ask first");
+        assert_eq!(
+            with_dialog.len(),
+            4,
+            "remove, bulk remove, restart and a long queue drop ask first"
+        );
         for (action, confirm) in DESTRUCTIVE {
             assert!(!action.is_empty());
             if confirm != Confirm::None {
-                assert!(confirm.has_file_checkbox() || confirm == Confirm::Restart);
+                assert!(
+                    confirm.has_file_checkbox()
+                        || confirm == Confirm::Restart
+                        || confirm == Confirm::DropAll
+                );
             }
         }
     }
 
     #[test]
+    fn a_short_queue_is_dropped_at_once_a_long_one_asks() {
+        assert_eq!(drop_all_confirm(DROP_ALL_CONFIRM_THRESHOLD - 1), Confirm::None);
+        assert_eq!(drop_all_confirm(DROP_ALL_CONFIRM_THRESHOLD), Confirm::DropAll);
+        assert_eq!(drop_all_confirm(0), Confirm::None);
+        let body = Confirm::DropAll.body(DROP_ALL_CONFIRM_THRESHOLD);
+        assert!(body.contains("no partial data is lost"));
+        assert!(body.contains("Cannot be undone"));
+        assert!(!Confirm::DropAll.has_file_checkbox());
+    }
+
+    #[test]
+    fn resume_all_names_the_failed_downloads_it_cannot_continue() {
+        let mixed = resume_all_outcome(3, 2);
+        assert!(mixed.contains('3'), "{mixed}");
+        assert!(mixed.contains("2 failed download(s) cannot continue"), "{mixed}");
+        assert!(mixed.contains("Restart"));
+        let none_left = resume_all_outcome(3, 0);
+        assert!(!none_left.contains("cannot continue"));
+        let nothing = resume_all_outcome(0, 1);
+        assert!(nothing.starts_with("Nothing to continue"), "{nothing}");
+        assert!(nothing.contains("1 failed download(s)"));
+    }
+
+    #[test]
+    fn help_covers_states_shortcuts_and_vocabulary() {
+        let sections = help_sections();
+        assert_eq!(sections.len(), 3);
+        for (heading, lines) in &sections {
+            assert!(!heading.is_empty());
+            assert_eq!(
+                lines.len(),
+                match *heading {
+                    "What the states mean" => ALL_STATES.len(),
+                    "Keyboard" => SHORTCUTS.len(),
+                    _ => GLOSSARY.len(),
+                },
+                "{heading} lists every entry"
+            );
+        }
+    }
+
+    #[test]
     fn confirmations_state_the_consequence_and_the_undo_status() {
-        for confirm in [Confirm::RemoveOne, Confirm::RemoveCompleted, Confirm::Restart] {
+        for confirm in [
+            Confirm::RemoveOne,
+            Confirm::RemoveCompleted,
+            Confirm::Restart,
+            Confirm::DropAll,
+        ] {
             let body = confirm.body(2);
             assert!(
                 body.contains("Cannot be undone"),

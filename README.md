@@ -112,7 +112,7 @@ vice versa.
 | CLI | GUI |
 | --- | --- |
 | `rdm download <URL> …` | **New download** dialog (output, connections, retries, chunk size, speed limit, timeout, checksum, user agent, resume/force) |
-| `rdm pause / resume / cancel <ID>` | ⏸ / ▶ / ⏹ row buttons, plus *Pause all* and *Resume all* |
+| `rdm pause / resume / cancel <ID>` | ⏸ / ▶ / ⏹ row buttons, plus *Pause all* and *Resume all*. `resume` continues paused, interrupted and cancelled downloads; a **failed** download is terminal for it, so the row offers ⟲ *Restart* and the status message says so |
 | `rdm download --force` | ⟲ *Restart* row button |
 | `rdm list [--state …]` | Download table (full-width rows: click selects, double-click opens details) with search box and state filter |
 | `rdm info <ID>` | **Overview**, **Chunks** and **Events** tabs of the details modal |
@@ -127,12 +127,17 @@ Beyond the CLI surface the window adds:
   that pick directories in the native file explorer.
 * **Download queue** — at most `max_concurrent` transfers run at once
   (default 3, `0` = unlimited); the rest wait in the *Queue* sidebar and can be
-  dropped individually or all at once.
+  dropped individually or all at once (emptying a queue of five or more asks
+  first; a shorter one is dropped at once because nothing has been downloaded).
 * **Status bar** — a one-line footer with download counters; the **Events** and
   **App log** buttons expand a box above it (wrapping long lines). The engine's
   `tracing` output is captured in-process and shown live; verbosity is a combo
   box (`off`..`trace`), also settable with `-v` / `-vv` / `-vvv`, and `RUST_LOG`
   still wins.
+* **Help in the app** — `F1` (or the ⓘ button in the filter row) opens the help
+  window: what every state means and what to do next, the keyboard map, and the
+  words rdm uses. The same state definitions are on every state chip and on the
+  status-bar counters as tooltips.
 * **Confirmations** — destructive actions ask first and name the consequence:
   *Remove* (one or all completed downloads) and *Restart from scratch* (which
   discards the progress and overwrites the file). The dialog says what is lost

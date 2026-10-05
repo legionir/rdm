@@ -77,7 +77,7 @@ pub fn show(
                 .on_hover_text(ux::drop_queue_tooltip())
                 .clicked()
             {
-                actions.push(UiAction::DropQueue);
+                actions.push(UiAction::AskDropQueue);
             }
         }
 
@@ -143,10 +143,15 @@ pub fn show(
             components::hint(
                 ui,
                 &palette,
-                "Enter: details · ↑/↓: select · Ctrl+F: search",
+                "Enter: details · ↑/↓: select · Ctrl+F: search · F1: help",
             );
-            ui.label(RichText::new("ⓘ").small().color(palette.text_muted))
-                .on_hover_text(ux::legend_tooltip());
+            if ui
+                .small_button("ⓘ Help")
+                .on_hover_text("States, shortcuts and vocabulary — press F1")
+                .clicked()
+            {
+                actions.push(UiAction::ToggleHelp);
+            }
         }
     });
 

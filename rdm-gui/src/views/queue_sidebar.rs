@@ -29,7 +29,7 @@ pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
                     .on_hover_text(ux::drop_queue_tooltip())
                     .clicked()
             {
-                actions.push(UiAction::DropQueue);
+                actions.push(UiAction::AskDropQueue);
             }
         });
     });

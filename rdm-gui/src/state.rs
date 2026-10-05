@@ -32,6 +32,8 @@ pub enum UiAction {
     /// Drop one queued download (nothing has been downloaded yet).
     DropQueued(u64),
     DropQueue,
+    /// Bulk drop that asks first when the queue is long.
+    AskDropQueue,
     OpenOutputFolder(i64),
     /// Double-click on a row: open the details modal for this download.
     OpenDetails(i64),
@@ -39,6 +41,8 @@ pub enum UiAction {
     ReloadSettings,
     ApplyDataDir,
     ClearLog,
+    /// Toggle the in-app help (state legend, shortcuts, vocabulary).
+    ToggleHelp,
 }
 
 /// Which tab of the details modal is open.
@@ -71,6 +75,8 @@ pub enum PendingConfirm {
     RemoveCompleted { subject: usize },
     /// Download again from the beginning.
     Restart { id: i64, label: String },
+    /// Bulk drop of a long queue.
+    DropQueue { subject: usize },
 }
 
 impl PendingConfirm {
@@ -80,6 +86,7 @@ impl PendingConfirm {
             PendingConfirm::Remove { .. } => crate::ux::Confirm::RemoveOne,
             PendingConfirm::RemoveCompleted { .. } => crate::ux::Confirm::RemoveCompleted,
             PendingConfirm::Restart { .. } => crate::ux::Confirm::Restart,
+            PendingConfirm::DropQueue { .. } => crate::ux::Confirm::DropAll,
         }
     }
 
@@ -87,7 +94,9 @@ impl PendingConfirm {
     pub fn subject(&self) -> usize {
         match self {
             PendingConfirm::Remove { .. } | PendingConfirm::Restart { .. } => 1,
-            PendingConfirm::RemoveCompleted { subject } => *subject,
+            PendingConfirm::RemoveCompleted { subject } | PendingConfirm::DropQueue { subject } => {
+                *subject
+            }
         }
     }
 
@@ -97,7 +106,7 @@ impl PendingConfirm {
             PendingConfirm::Remove { label, .. } | PendingConfirm::Restart { label, .. } => {
                 Some(label)
             }
-            PendingConfirm::RemoveCompleted { .. } => None,
+            PendingConfirm::RemoveCompleted { .. } | PendingConfirm::DropQueue { .. } => None,
         }
     }
 }
@@ -178,6 +187,8 @@ pub struct GuiState {
     pub detail_tab: DetailTab,
     /// Which box the footer bar has expanded (`None` = collapsed).
     pub footer_panel: Option<FooterPanel>,
+    /// Whether the in-app help overlay is visible (`F1`).
+    pub show_help: bool,
     /// Whether the settings sidebar is visible (toggled from the top menu).
     pub show_settings: bool,
     /// Whether the queue sidebar is visible (toggled from the top menu).
@@ -216,6 +227,7 @@ impl GuiState {
             detail_id: None,
             detail_tab: DetailTab::Overview,
             footer_panel: None,
+            show_help: false,
             show_settings: false,
             show_queue: false,
             chunks: Vec::new(),

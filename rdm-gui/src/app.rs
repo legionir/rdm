@@ -228,6 +228,16 @@ impl RdmGuiApp {
                     self.restart_now(id);
                 }
             }
+            UiAction::AskDropQueue => {
+                let queued = self.state.queue.len();
+                match ux::drop_all_confirm(queued) {
+                    Confirm::None => self.drop_queue_now(),
+                    _ => {
+                        self.state.pending_confirm =
+                            Some(PendingConfirm::DropQueue { subject: queued });
+                    }
+                }
+            }
             UiAction::AskRemoveCompleted => {
                 let subject = self
                     .state
@@ -267,10 +277,17 @@ impl RdmGuiApp {
                 let defaults = self.settings.settings().to_request();
                 let limit = self.max_concurrent();
                 match self.backend.resume_all(&defaults, limit) {
-                    Ok(0) => self
-                        .state
-                        .push_log("info", BulkAction::ResumeAll.nothing_to_do()),
-                    Ok(n) => self.state.push_log("info", BulkAction::ResumeAll.done(n)),
+                    Ok(n) => {
+                        // Failed downloads cannot continue (the engine rejects
+                        // them), so name them instead of skipping them silently.
+                        let needs_restart = self
+                            .state
+                            .downloads
+                            .iter()
+                            .filter(|r| r.state == DownloadState::Failed)
+                            .count();
+                        self.state.push_log("info", ux::resume_all_outcome(n, needs_restart));
+                    }
                     Err(err) => self.state.push_log("error", format!("{err:#}")),
                 }
             }
@@ -350,14 +367,8 @@ impl RdmGuiApp {
                 ),
             },
             UiAction::DropQueue => {
-                let n = self.backend.clear_queue();
-                if n == 0 {
-                    self.state
-                        .push_log("info", BulkAction::DropQueue.nothing_to_do());
-                } else {
-                    self.state
-                        .push_log("info", BulkAction::DropQueue.done(n));
-                }
+                self.state.pending_confirm = None;
+                self.drop_queue_now();
             }
             UiAction::ClearLog => self.state.log.clear(),
         }
@@ -389,6 +400,20 @@ impl RdmGuiApp {
             ),
             Err(err) => self.state.push_log("error", format!("{err:#}")),
         }
+    }
+
+    /// Drop every queued download; nothing has been fetched yet, but the count
+    /// is still reported so the action is never silent.
+    fn drop_queue_now(&mut self) {
+        let n = self.backend.clear_queue();
+        if n == 0 {
+            self.state
+                .push_log("info", BulkAction::DropQueue.nothing_to_do());
+        } else {
+            self.state
+                .push_log("info", BulkAction::DropQueue.done(n));
+        }
+        self.state.queue = self.backend.pending();
     }
 
     /// Remove every completed download; the count and the file decision are
@@ -440,7 +465,9 @@ impl RdmGuiApp {
 
     /// Escape closes the top-most overlay, then the side panels.
     fn close_overlay(&mut self) {
-        if self.state.show_add {
+        if self.state.show_help {
+            self.state.show_help = false;
+        } else if self.state.show_add {
             self.state.show_add = false;
             self.state.form_error = None;
         } else if self.state.pending_confirm.is_some() {
@@ -463,7 +490,7 @@ impl RdmGuiApp {
         if ctx.wants_keyboard_input() {
             return;
         }
-        let (up, down, enter, escape, find, refresh) = ctx.input(|i| {
+        let (up, down, enter, escape, find, refresh, help) = ctx.input(|i| {
             (
                 i.key_pressed(egui::Key::ArrowUp),
                 i.key_pressed(egui::Key::ArrowDown),
@@ -471,6 +498,7 @@ impl RdmGuiApp {
                 i.key_pressed(egui::Key::Escape),
                 i.modifiers.command && i.key_pressed(egui::Key::F),
                 i.key_pressed(egui::Key::F5),
+                i.key_pressed(egui::Key::F1),
             )
         });
         if down {
@@ -490,6 +518,9 @@ impl RdmGuiApp {
         if refresh {
             self.refresh(true);
         }
+        if help {
+            self.state.show_help = !self.state.show_help;
+        }
         if escape {
             self.close_overlay();
         }
@@ -505,6 +536,7 @@ impl RdmGuiApp {
             return actions;
         };
         let confirm = pending.policy();
+        let checkbox = confirm.has_file_checkbox();
         let palette = theme::palette_ctx(ctx);
         let spacing = Spacing::default();
         let mut purge = self.settings.settings().purge_on_remove;
@@ -519,7 +551,7 @@ impl RdmGuiApp {
                     ui.add_space(spacing.xs);
                 }
                 components::banner(ui, &palette, components::Level::Warning, &confirm.body(pending.subject()));
-                if confirm.has_file_checkbox() {
+                if checkbox {
                     ui.add_space(spacing.sm);
                     ui.checkbox(&mut purge, "also delete the finished file(s)");
                 }
@@ -536,7 +568,7 @@ impl RdmGuiApp {
         if close {
             self.state.pending_confirm = None;
         }
-        if confirm.has_file_checkbox() && purge != self.settings.settings().purge_on_remove {
+        if checkbox && purge != self.settings.settings().purge_on_remove {
             self.settings.settings_mut().purge_on_remove = purge;
         }
         actions
@@ -549,6 +581,7 @@ fn confirmed_action(pending: &PendingConfirm, purge: bool) -> UiAction {
         PendingConfirm::Remove { id, .. } => UiAction::Remove { id: *id, purge },
         PendingConfirm::RemoveCompleted { .. } => UiAction::RemoveCompletedConfirmed { purge },
         PendingConfirm::Restart { id, .. } => UiAction::Restart(*id),
+        PendingConfirm::DropQueue { .. } => UiAction::DropQueue,
     }
 }
 
@@ -661,6 +694,7 @@ impl eframe::App for RdmGuiApp {
 
         actions.extend(crate::views::add_download::show(ctx, &mut self.state));
         actions.extend(crate::views::details_modal::show(ctx, &mut self.state));
+        actions.extend(crate::views::help_overlay::show(ctx, &mut self.state));
         actions.extend(self.confirm_dialog(ctx));
 
         for action in actions {
