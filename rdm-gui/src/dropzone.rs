@@ -153,7 +153,8 @@ impl DropZone {
         }
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(palette.surface_window).rounding(6.0).stroke(egui::Stroke::new(1.0, palette.accent)))
+            .frame(egui::Frame::none().fill(palette.surface_window).rounding(6.0_f32)
+                .stroke(egui::Stroke::new(1.0_f32, palette.accent)))
             .show(ctx, |ui| {
                 ui.add_space(spacing.xs);
                 ui.horizontal(|ui| {

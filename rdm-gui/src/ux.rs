@@ -497,7 +497,6 @@ mod tests {
             drop_queue_tooltip(),
             new_download_tooltip(true),
             new_download_tooltip(false),
-            drop_accepted("https://example.com/x.zip"),
             URL_FIELD_HINT,
             ADD_TIP,
             resume_all_tooltip(),
@@ -505,6 +504,9 @@ mod tests {
         ] {
             copy.push(tooltip.to_string());
         }
+        // Dynamic copy: the drop confirmation names the link it accepted
+        // (checked in `the_clipboard_shortcut_is_described_in_the_tooltip_it_changes`).
+        copy.push(drop_accepted("https://example.com/x.zip"));
         for state in ALL_STATES {
             copy.push(restart_tooltip(state).to_string());
         }
