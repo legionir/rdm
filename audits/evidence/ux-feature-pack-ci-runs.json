@@ -106,5 +106,41 @@
       }
     },
     "note": "the pull_request duplicate for the same sha (37369748949) stayed queued and never got a runner"
+  },
+  "green_final": {
+    "run": 37374029321,
+    "sha": "9dad002",
+    "event": "push",
+    "conclusion": "success",
+    "jobs": {
+      "build-gui-windows": {
+        "id": 111977932415,
+        "steps": [
+          "Build GUI binary success",
+          "Surface compiler errors skipped (no errors)",
+          "Test GUI crate success (77 unit tests)",
+          "Surface test failures skipped (none)",
+          "Stage GUI binary success",
+          "Upload GUI artifact success"
+        ]
+      },
+      "test-windows": {
+        "id": 111977932810,
+        "conclusion": "success"
+      }
+    },
+    "note": "artifact rdm-gui-windows-x86_64.exe (icon embedded) can be downloaded from this run for the QA smoke test"
+  },
+  "green_intermediate": {
+    "run": 37370758163,
+    "sha": "9dcadd8",
+    "event": "pull_request",
+    "conclusion": "success",
+    "note": "the queued pull_request duplicate from the previous turn completed green"
+  },
+  "verification_round_2026_10_06": {
+    "bug_a": "settings.rs: escape() no longer escapes backslashes; 5-round round-trip test (windows_paths_survive_any_number_of_round_trips) + legacy test (a_legacy_doubled_path_is_preserved_and_no_longer_grows); legacy values are preserved and explained in Settings rather than silently rewritten (ux::doubled_separator_hint, never fires for UNC/extended paths)",
+    "bug_b": "main.rs:13 windows_subsystem=windows; util.rs:96-99 CREATE_NO_WINDOW on the only Command::new in rdm-gui",
+    "claim_corrected": "an earlier draft/report claimed the loader decoded a legacy doubled backslash; the code preserves it. Report corrected and the real behaviour pinned by a test."
   }
 }
