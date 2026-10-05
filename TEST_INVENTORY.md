@@ -22,7 +22,7 @@
 - src/cli/commands.rs: 7 new (parse_checksum ×3, opts_parse ×3, connections_range)
 - tests/cli_real.rs: 2 new (help/version, bad-url graceful)
 
-## GUI tests (rdm-gui/src/) — 39 tests
+## GUI tests (rdm-gui/src/) — 48 tests
 - backend.rs: 10
 - logging.rs: 2
 - settings.rs: 4
@@ -32,10 +32,18 @@
 - theme/mod.rs: 4 (design guards: no colour literals in views, every view uses `theme::`, sidebar cap, theme reversibility)
 - theme/components.rs: 2 (row-background precedence, banner severities)
 - views/download_list.rs: 4 (responsive column fitting, optional-column drop order, width invariant)
+- ux.rs: 9 (UX policy: confirmation scope and consequence copy, safe-option naming, bulk
+  count/zero-case copy, state legend completeness, Failed/Completed never offer Resume,
+  remove-while-running explanation, jargon-free copy, glossary synonyms)
 
 Design layer: `rdm-gui/src/theme/` is the single source of truth for colour,
 spacing, radii, typography, sizes and breakpoints; the column-fitting tests
 were extended and are kept green by the same CI job.
+
+UX layer: `rdm-gui/src/ux.rs` is the single source of truth for confirmation
+policy, consequence copy, the state legend, bulk-action microcopy and the
+glossary; `audits/ux-terminology-check.py` enforces the same rules statically
+over CLI help, the GUI strings and the README.
 
 ## CI (after ci/ci-tests.patch)
 - test-linux (cargo test --locked --all-targets)
