@@ -49,33 +49,6 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_dropped_link_becomes_a_report_and_junk_does_not() {
-        let dropped = vec![
-            egui::DroppedFile {
-                path: Some(PathBuf::from("/tmp/does-not-exist-rdm-test.txt")),
-                ..Default::default()
-            },
-            egui::DroppedFile {
-                name: "https://example.com/dropped.bin".to_string(),
-                ..Default::default()
-            },
-        ];
-        let reports = dropped_links(&dropped);
-        assert_eq!(reports.len(), 2);
-        assert!(reports[0].url.is_none(), "missing file is not a link");
-        assert!(!reports[0].note.is_empty());
-        assert_eq!(
-            reports[1].url.as_deref(),
-            Some("https://example.com/dropped.bin")
-        );
-    }
-}
-
 /// `1h 02m 03s` / `45s`
 pub fn format_duration(secs: f64) -> String {
     if !secs.is_finite() || secs < 0.0 {
@@ -196,6 +169,28 @@ pub fn pick_folder(start: Option<&std::path::Path>, title: &str) -> Option<PathB
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dropped_link_becomes_a_report_and_junk_does_not() {
+        let dropped = vec![
+            egui::DroppedFile {
+                path: Some(PathBuf::from("/tmp/does-not-exist-rdm-test.txt")),
+                ..Default::default()
+            },
+            egui::DroppedFile {
+                name: "https://example.com/dropped.bin".to_string(),
+                ..Default::default()
+            },
+        ];
+        let reports = dropped_links(&dropped);
+        assert_eq!(reports.len(), 2);
+        assert!(reports[0].url.is_none(), "missing file is not a link");
+        assert!(!reports[0].note.is_empty());
+        assert_eq!(
+            reports[1].url.as_deref(),
+            Some("https://example.com/dropped.bin")
+        );
+    }
 
     #[test]
     fn formats_epoch_milliseconds() {
