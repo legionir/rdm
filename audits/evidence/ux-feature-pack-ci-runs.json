@@ -41,6 +41,30 @@
       "conclusion": "infrastructure",
       "cause": "infrastructure",
       "detail": "build-gui-windows cancelled for the same reason; the pull_request run 37364684573 for the same SHA failed identically"
+    },
+    {
+      "run": 37366518834,
+      "sha": "cf7c211",
+      "event": "push",
+      "conclusion": "failure",
+      "cause": "code",
+      "detail": "library + assets + build script compiled (feature pack complete); test target failed: util.rs defined `mod tests` twice \u2014 fixed in 680d5f3"
+    },
+    {
+      "run": 37368129718,
+      "sha": "680d5f3",
+      "event": "push",
+      "conclusion": "infrastructure",
+      "cause": "infrastructure",
+      "detail": "build-gui-windows never acquired a hosted runner (no step ran); test-windows passed"
+    },
+    {
+      "run": 37368133806,
+      "sha": "680d5f3",
+      "event": "pull_request",
+      "conclusion": "infrastructure",
+      "cause": "infrastructure",
+      "detail": "same SHA, same runner-acquisition failure"
     }
   ],
   "audits": {
@@ -56,5 +80,7 @@
     "the icon Explorer shows for the built exe",
     "absence of a console window for the shipped exe"
   ],
-  "escalation": "UX-ESC-005 (P1, owner QA)"
+  "escalation": "UX-ESC-005 (P1, owner QA)",
+  "note_ph6_baseline": "when a runner is available the GUI job takes ~2m15s (run 37358775197), so queue starvation \u2014 not build time \u2014 is the blocker",
+  "pending": "GUI test result for 680d5f3 (and later) pending a runner"
 }

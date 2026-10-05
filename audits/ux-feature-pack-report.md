@@ -168,10 +168,17 @@ starts `rdm-gui.exe` from Explorer with no console present and verifies no windo
 | **Explorer shows the new icon for the built exe** | needs the built artefact on Windows | ❌ **NOT VERIFIED here → UX-ESC-005** |
 
 No usability claim is made for the unverified rows. A checklist for the smoke test is in the
-escalation (§11). Also recorded: **two CI runs (37362918254, 37364680078/37364684573) never
-started** because GitHub could not acquire a hosted Windows runner
-(“The job was not acquired by Runner of type hosted even after multiple attempts”) — an
-infrastructure failure, not a code failure; the runs were re-triggered by pushing.
+escalation (§11).
+
+**CI availability, recorded honestly.** Four runs in this increment never reached a runner:
+
+| Runs | sha | What happened |
+| --- | --- | --- |
+| 37362918254, 37364680078 / 37364684573, 37368129718 / 37368133806 | `eeb9880`, `3e0cbfb`, `680d5f3` | “The job was not acquired by Runner of type hosted even after multiple attempts” — the `build-gui-windows` job queued for 12–15 min and was cancelled without running a single step. The `test-windows` job (CLI/engine) passed in the same runs, and run 37366518834 did reach a GUI runner and compiled the **whole** feature pack (tray, drop target, icon build script) — its only error was the duplicate test module fixed in `680d5f3`. |
+
+That is an infrastructure failure on the GitHub side, not a code failure, and it is why the
+GUI test result for this increment is still pending. The runs are re-triggered by pushing; the
+workflow file itself is out of scope (`UX-ESC-003`) and was not touched to work around it.
 
 ## 10. Change manifest (this increment)
 
@@ -228,8 +235,12 @@ Priority:    P1 (the features are user-visible; a wrong anchor or a dead tray wo
   polish item — recorded as an open recommendation, not a defect.
 * `arboard`, `tray-icon` and `windows-sys` are new runtime dependencies of the GUI. They were
   unavoidable for F2–F5 (clipboard, tray, work-area query) and only affect `rdm-gui`.
-* The pre-existing `float_literal_f32_fallback` warnings in `theme/mod.rs` are from the newer
-  toolchain and are **not** part of this increment; the one in `dropzone.rs` was fixed while
-  it was being reviewed.
+* The pre-existing `float_literal_f32_fallback` warnings (`theme/mod.rs:96,101,102`,
+  `views/download_list.rs:223`) come from the toolchain the runner uses and are **not** part of
+  this increment; the one in `dropzone.rs` was fixed while it was being reviewed. They are
+  future-incompatible (“will become a hard error”), so the owning increment should pick them
+  up — recorded here rather than changed silently: **REC-UX-006** (owner: UI increment).
+* The same warning class in `theme/mod.rs:19` (`state_glyph` imported but unused) is also
+  pre-existing and left alone for the same reason.
 * Not done here (out of this increment's request): keyboard shortcut to open the drop target,
   a settings control for the tray icon itself, and moving the drop target by dragging.
