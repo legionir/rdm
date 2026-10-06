@@ -157,7 +157,7 @@ impl Tray {
             .spawn(move || {
                 while let Ok(event) = MenuEvent::receiver().recv() {
                     if let Some(command) = command_for(&menu_ids, &event.id) {
-                        deliver(command, &menu_inbox, &menu_wake);
+                        deliver(command, &menu_inbox, &*menu_wake);
                     }
                 }
             })
@@ -178,7 +178,7 @@ impl Tray {
                         event,
                         TrayIconEvent::Click { .. } | TrayIconEvent::DoubleClick { .. }
                     ) {
-                        deliver(TrayCommand::Show, &icon_inbox, &icon_wake);
+                        deliver(TrayCommand::Show, &icon_inbox, &*icon_wake);
                     }
                 }
             })

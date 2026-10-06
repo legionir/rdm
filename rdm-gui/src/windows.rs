@@ -129,7 +129,8 @@ pub fn hide_main_window() -> bool {
     if raw == 0 {
         return false;
     }
-    let hwnd = raw as *mut core::ffi::c_void;
+    // `HWND` is an `isize` in `windows-sys` 0.52, not a pointer.
+    let hwnd = raw;
     unsafe {
         let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         let wanted = (style
@@ -141,7 +142,7 @@ pub fn hide_main_window() -> bool {
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted);
             SetWindowPos(
                 hwnd,
-                std::ptr::null_mut(),
+                0,
                 0,
                 0,
                 0,
@@ -178,7 +179,8 @@ pub fn reveal_main_window() -> bool {
     if raw == 0 {
         return false;
     }
-    let hwnd = raw as *mut core::ffi::c_void;
+    // `HWND` is an `isize` in `windows-sys` 0.52, not a pointer.
+    let hwnd = raw;
     unsafe {
         let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         let wanted = style
@@ -187,7 +189,7 @@ pub fn reveal_main_window() -> bool {
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted);
             SetWindowPos(
                 hwnd,
-                std::ptr::null_mut(),
+                0,
                 0,
                 0,
                 0,
