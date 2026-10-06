@@ -140,6 +140,12 @@ fn small_font(ui: &Ui) -> FontId {
 
 /// A single-line text input with the standard geometry: same height as buttons,
 /// combo boxes and the folder pickers, one place to change it.
+///
+/// The reply's `rect` is the **inner** text rect: `TextEdit` shrinks it by the
+/// margin on purpose (egui 0.29 `text_edit/builder.rs:416`). What the user sees
+/// and what lines up with the next control is the frame, and that is the full
+/// control height; a caller that needs that rect wraps the call in a
+/// `ui.scope(…)` (the layout test does) rather than trusting `Response::rect`.
 pub fn text_edit(ui: &mut Ui, value: &mut String, width: f32, hint: &str) -> Response {
     let spacing = Spacing::default();
     // The margin only pads the text; the *height* is the shared control height,

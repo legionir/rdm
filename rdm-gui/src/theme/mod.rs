@@ -195,11 +195,20 @@ mod tests {
                     "icon button",
                     components::icon_button(ui, Icon::Close, "clear").rect.height(),
                 ));
+                // `TextEdit` deliberately shrinks its own reply to the *inner*
+                // text rect (egui 0.29 `text_edit/builder.rs:416` — “TODO: return
+                // full outer_rect”), so the reply rect is one margin smaller than
+                // the control. “The same height as the button beside it” is about
+                // the frame the user sees, so the input is measured through a
+                // scope, whose rect is the space the control occupies.
                 heights.push((
                     "text input",
-                    components::text_edit(ui, &mut text, 120.0, "hint")
-                        .rect
-                        .height(),
+                    ui.scope(|ui| {
+                        components::text_edit(ui, &mut text, 120.0, "hint");
+                    })
+                    .response
+                    .rect
+                    .height(),
                 ));
                 // `ComboBox` is not a `Widget` in egui 0.29 — it is shown, and
                 // the height to compare is its button's.
