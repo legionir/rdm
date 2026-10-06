@@ -106,6 +106,9 @@ struct Shared {
     /// Copy the store into the draft on the next frame (on open, and on
     /// Reload).
     seed: bool,
+    /// The active tab. It lives here, not in the struct, because the viewport
+    /// closure is an `Fn`: it may read captured values, not mutate them.
+    tab: Tab,
 }
 
 impl Shared {
@@ -119,6 +122,7 @@ impl Shared {
             actions: Vec::new(),
             close_requested: false,
             seed: true,
+            tab: Tab::Downloads,
         }
     }
 }
@@ -185,7 +189,6 @@ impl SettingsWindow {
         }
 
         let shared = Arc::clone(&self.shared);
-        let mut tab = self.tab;
         let palette = theme::palette_ctx(ctx);
         let sizes = Sizes::default();
         let spacing = Spacing::default();
@@ -215,7 +218,7 @@ impl SettingsWindow {
                     if ctx.input(|i| i.viewport().close_requested()) {
                         shared.close_requested = true;
                     }
-                    tab_strip(ui, &mut tab, &spacing);
+                    tab_strip(ui, &mut shared.tab, &spacing);
                     ui.separator();
                     ui.add_space(spacing.xs);
                     let before = shared.draft.clone();
@@ -230,6 +233,7 @@ impl SettingsWindow {
                                 db_path,
                                 dirty,
                                 actions,
+                                tab,
                                 ..
                             } = &mut *shared;
                             let mut env = Env {
@@ -238,7 +242,7 @@ impl SettingsWindow {
                                 data_dir_input,
                                 dirty: *dirty,
                             };
-                            actions.extend(tab_body(ui, tab, draft, &mut env));
+                            actions.extend(tab_body(ui, *tab, draft, &mut env));
                             *dirty = env.dirty;
                         });
                     if shared.draft != before {
@@ -284,6 +288,7 @@ impl SettingsWindow {
         }
         state.data_dir_input = shared.data_dir_input.clone();
         state.settings_dirty = shared.dirty;
+        self.tab = shared.tab;
 
         let actions = std::mem::take(&mut shared.actions);
         // Reload means “throw my edits away”: re-copy the store on the next

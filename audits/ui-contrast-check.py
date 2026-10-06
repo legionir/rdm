@@ -130,6 +130,51 @@ def delimiter_balance(src: str) -> str | None:
     return None
 
 
+def balanced_block(src: str, start: int) -> str:
+    """The text between the `{` at `start` and its matching `}`."""
+    depth = 0
+    for i in range(start, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start + 1:i]
+    raise ValueError("unbalanced braces")
+
+
+def token_field_problems(tokens_rs: str) -> list[str]:
+    """Declared vs initialised fields of every `pub struct` in `theme/tokens.rs`.
+
+    A scripted edit once deleted a field's declaration while leaving its
+    initialiser and its readers behind (`E0560` / `E0609`), and only CI noticed,
+    a full round-trip later. This is the local tripwire.
+    """
+    problems: list[str] = []
+    for m in re.finditer(r"pub struct (\w+) \{", tokens_rs):
+        name = m.group(1)
+        body = balanced_block(tokens_rs, m.end() - 1)
+        declared = {f for f in re.findall(r"(?:^|\n)\s*(?:pub )?(\w+):", body)}
+        impl = re.search(rf"impl Default for {name} \{{", tokens_rs)
+        if not impl:
+            continue
+        block = balanced_block(tokens_rs, impl.end() - 1)
+        literal = re.search(rf"{name} \{{", block)
+        if not literal:
+            problems.append(f"{name}: impl Default does not build an {name}")
+            continue
+        init = balanced_block(block, literal.end() - 1)
+        # `name:` but not `Type::method()`: the lookahead keeps `Vec2::new` out.
+        initialised = {f for f in re.findall(r"(?<![\w:])(\w+)\s*:(?!:)", init)}
+        for field in sorted(initialised - declared):
+            problems.append(
+                f"{name}: default sets `{field}`, which is not a declared field"
+            )
+        for field in sorted(declared - initialised):
+            problems.append(f"{name}: `{field}` is declared but never given a default")
+    return problems
+
+
 def strip_comments(src: str) -> str:
     """Remove `//` line comments and `/* */` blocks, keeping string literals.
 
@@ -336,9 +381,16 @@ def main() -> int:
         say(f"  [ok] {len(sources)} user-facing files: no codepoints outside the "
             f"fonts egui bundles")
 
-    # 5 — delimiter sanity -------------------------------------------------
+    # 5 — delimiter and token sanity ---------------------------------------
     say("")
     say("== 5. Static sanity of the changed Rust files ==")
+    problems = token_field_problems((gui / "theme" / "tokens.rs").read_text())
+    if problems:
+        for problem in problems:
+            say(f"  FAIL theme/tokens.rs: {problem}")
+            failures += 1
+    else:
+        say("  [ok] theme/tokens.rs: every declared token field has a default")
     changed = sorted(gui.rglob("*.rs"))
     unbalanced = 0
     for path in changed:

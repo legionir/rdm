@@ -266,6 +266,7 @@ pub struct Spacing {
     /// State icon inside a status chip.
     pub state_icon: f32,
     /// Global `button_padding`.
+    pub button: Vec2,
     /// Global `interact_size`.
     pub interact: Vec2,
     /// Table row height (the column padding lives in [`Table`]).
