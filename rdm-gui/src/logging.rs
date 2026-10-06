@@ -199,7 +199,8 @@ impl LogControl {
 
     /// Where the log file is, when one is being written.
     pub fn log_file(&self) -> Option<&Path> {
-        self.buffer.log_file().path
+        // Borrowed from the live buffer, not from a clone of the handle.
+        self.buffer.file.path.as_deref().map(PathBuf::as_path)
     }
 
     /// `directive` is one of [`LEVELS`] (or any `RUST_LOG` expression).
