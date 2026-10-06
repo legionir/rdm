@@ -124,6 +124,30 @@ clipboard pre-fill, tray, tray menu, floating drop target) on 2026-10-05.
 | 7.9 | CI: compile + 75 GUI unit tests (was 51) + CLI regression | 🟢 run **37369744644** (`b478f4b`): `build-gui-windows` ✓ (Build GUI binary · Test GUI crate · Stage · Upload) and `test-windows` ✓, after four annotation-driven fix rounds (37361180868, 37361634987, 37362408563, 37366518834) and three runs that never reached a runner (37362918254, 37364680078/37364684573, 37368129718/37368133806 — GitHub could not acquire a hosted Windows runner); the `pull_request` duplicate of the green commit stayed queued |
 | 7.10 | Windows-desktop smoke test (tray, target anchor under scaling, real clipboard, exe icon, no console window) | 🔴 open — `UX-ESC-005` (QA) |
 
+## PH-8 — Round-3 report: the tray freeze and the “standard heights” pass (3rd follow-up) `[🟡]`
+
+Trigger: the product owner reported on 2026-10-06, with three screenshots: Clear/Copy button
+sizes, ✕/ⓘ/↑↓ glyphs rendering as empty boxes, unequal heights across the toolbar row and
+between the Settings folder-picker button and its input, Settings needing to be a **real window
+with tabs** plus a corner ✕ (Help too), a general “one height for text inputs, dropdowns, buttons
+and everything else”, the tray going dead (“no menu item works and the window will not come
+back”), and the floating target needing to be a **small circle carrying only the logo** that still
+accepts a dropped link while the app sits in the tray.
+
+| Step | Work | Status |
+| --- | --- | --- |
+| 8.1 | Drawn icons instead of font glyphs (✕, ⓘ, ✓, ↑↓, ▾) everywhere, with the audit rule that bans exotic codepoints; footer Clear/Copy and the toolbar row follow the same control height | 🟢 (PH-2/PH-3 work, re-verified) |
+| 8.2 | One control height (**24 pt**) for buttons, icon buttons, text inputs, combo boxes and the folder pickers; `components::text_edit` pins it with `min_size(0, control_height)`; the layout test measures the rect the control *occupies* | 🟢 run **37522424155** |
+| 8.3 | Settings and Help are real windows (decorated, resizable, their own ✕), Settings with tabs and a Save/Reload footer | 🟢 code-complete; appearance pending `UX-ESC-005` |
+| 8.4 | Floating target: 76 pt transparent circle, the logo only, no explanatory text; a drop opens the pre-filled New-download form | 🟢 code-complete; desktop drop pending `UX-ESC-005` |
+| 8.5 | Tray freeze — root cause: `ViewportCommand::Visible(false)` clears `WS_VISIBLE`, Windows then sends no `WM_PAINT`, the frame loop stops for good, and every tray command is read inside a frame that can never come; minimizing is no escape either (nothing visible → nothing painted) | 🟢 (source-diagnosed: egui #5127/#737, winit 0.30 event-loop note, MSDN) |
+| 8.6 | Fix, layer 1 — hide the window the way winit hides its own helper window: keep `WS_VISIBLE` and take it off screen with the layered style (alpha 0, click-through, out of taskbar and Alt-Tab) via `windows::hide_main_window`; `reveal_main_window` undoes it from any thread | 🟢 |
+| 8.7 | Fix, layer 2 — the tray owns two blocking relay threads (menu, icon) that queue commands, wake the UI, and restore the window through the OS when the command is about the window or when `frames::is_stale()` (≈1 s) says the UI stopped delivering frames | 🟢 |
+| 8.8 | Fix, layer 3 — every viewport is cleared transparent, so the floating target is a mark instead of a dark square; the frame clock is noted at the top of `update()` | 🟢 |
+| 8.9 | CI round 1 — two annotation-driven fixes: `HWND` is an `isize` in `windows-sys` 0.52 (not a pointer), and `&Arc<Wake>` does not coerce to `&Wake` in argument position | 🟢 runs 37520509055 / 37520515850 → 37521061557 / 37521068081 |
+| 8.10 | CI round 2 — the failing height test now reports **which** control and by how much (the annotation filter needed the message to start with `assertion:`); it named the text input at 16 pt, which is `TextEdit` shrinking its reply to the inner rect (egui 0.29 `text_edit/builder.rs:416`) — the control itself is 24 pt | 🟢 runs 37521816137 / 37521825816 → **37522424155 / 37522433273** green (`8b03d25`) |
+| 8.11 | Windows-desktop smoke test of the round trip (close → tray → Show, a drop on the target while the window is hidden, the heights on a real desktop) | 🔴 open — `UX-ESC-005` (QA) |
+
 ## Discovered work (added with a reason, never silently)
 
 | # | Discovery | Reason it was added | Status |
@@ -144,6 +168,12 @@ clipboard pre-fill, tray, tray menu, floating drop target) on 2026-10-05.
 | D-14 | The delimiter guard in `audits/ui-contrast-check.py` skipped one character too many for escaped char literals (`'\n'`), reporting `{`/`}` as unbalanced in files that use them | Found by running the guard on the new files; the guard is itself evidence, so a false FAIL would have been a false alarm on a green tree | 🟢 |
 | D-15 | Two CI runs never started: “The job was not acquired by Runner of type hosted even after multiple attempts” (GitHub infrastructure) | Recorded so the red run list is not read as a code failure; re-triggered by pushing (the workflow file is out of scope, `UX-ESC-003`) | 🟢 (recorded) |
 | D-16 | A root `.gitignore` was added to keep `audits/__pycache__/*.pyc` (produced by running the audit scripts) out of the tree | Scope note: a new file at the repository root, flagged for approval; nothing existing was changed and no bytecode was ever committed | 🟢 (flagged) |
+| D-17 | Hiding the window with `ViewportCommand::Visible(false)` (and equally with `Minimized(true)`) stops `WM_PAINT`, so `App::update` never runs again — and `App::update` is where tray commands are applied. That is the whole round-3 freeze, and no heartbeat inside `update()` could have fixed it | Reported by the product owner; root-caused in PH-8.5 against egui/winit sources and MSDN before touching code | 🟢 PH-8.5-8.8 |
+| D-18 | A tray relay that only *queues* is not enough: the two commands that are about the window must work with no frame at all, so the relay thread itself restores the window through the OS (`windows::reveal_main_window`), and `frames::is_stale()` extends that to every command if the UI ever stops | Found while designing the fix; without it “Show rdm” would still depend on the frame loop it is supposed to rescue | 🟢 |
+| D-19 | `windows-sys` 0.52 defines `pub type HWND = isize`, not a pointer — the first CI compile failed on every cast | Annotation from run 37520509055; fixed with the raw `isize` and `0` for `SetWindowPos`'s insert-after | 🟢 8.9 |
+| D-20 | `deliver(cmd, &inbox, &menu_wake)` does not coerce `&Arc<Wake>` to `&Wake` in argument position; the relay threads now pass `&*menu_wake` | Annotation from the same run; the test’s `&*wake` form was already correct | 🟢 8.9 |
+| D-21 | egui 0.29’s `TextEdit` deliberately shrinks its `Response::rect` to the **inner** text rect (`text_edit/builder.rs:416`, with a TODO to return the outer rect), so the height test was measuring 16 pt while the control on screen was 24 pt | The failing assertion in run 37521816137 named it with numbers once the message was readable; documented on `components::text_edit` so no caller aligns to the wrong rect | 🟢 8.2 / 8.10 |
+| D-22 | The Windows job surfaces a failing test as a workflow annotation filtered by `^assertion`/`^left:`/`^right:`, so the *numbers* in a panic message were invisible; the assertion now starts with `assertion:` and lists every measurement | Two runs were spent guessing which control was off; the diagnostic change is what turned the third run into a one-line answer | 🟢 8.10 |
 
 ## Verification results (final)
 
@@ -157,6 +187,9 @@ clipboard pre-fill, tray, tray menu, floating drop target) on 2026-10-05.
 | Desktop integration (increment 2): flows, copy, help and README | PASS (static) | `audits/ux-feature-pack-report.md`, `audits/evidence/ux-feature-pack-checks.txt` |
 | Bug A round-trip (5 save/load cycles, legacy files) | PASS | `settings.rs` unit tests → CI `Test GUI crate` |
 | Tray / floating target / real clipboard / exe icon on a Windows desktop | **NOT RUN — NOT_APPLICABLE in this environment** | `UX-ESC-005` (QA smoke-test checklist) |
+| Control heights (button · icon button · text input · combo box · labelled button = 24 pt) | PASS | CI run **37522424155** (`build-gui-windows` → `Test GUI crate`); the red run 37521816137 carries the message that named the text input at 16 pt |
+| Tray-freeze fix compiles and every GUI test passes on Windows | PASS | CI runs **37522424155** / **37522433273** (`8b03d25`): `test-windows` ✓, `build-gui-windows` ✓, artifact `rdm-gui-windows-x86_64.exe` (5,808,400 bytes) |
+| Tray round trip (close → tray → Show / New download, drop on the target while hidden) on a real desktop | **NOT RUN — NOT_APPLICABLE in this environment** | `UX-ESC-005` (QA smoke test; the artifact above is the hand-off) |
 | User testing | **MISSING — NOT_APPLICABLE in this environment** | `UX-ESC-001` |
 
 ## Rule compliance notes

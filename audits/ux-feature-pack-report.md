@@ -265,3 +265,90 @@ Priority:    P1 (the features are user-visible; a wrong anchor or a dead tray wo
   `settings.rs::a_legacy_doubled_path_is_preserved_and_no_longer_grows`, and the user-facing
   consequence (a hint in Settings) was added in `cf7c211`+ instead of leaving a silent
   surprise.
+
+## 13. Round 3 (2026-10-06) — the tray freeze and the standard control heights
+
+### 13.1 What was reported
+
+| # | Report (intent) | Class |
+| --- | --- | --- |
+| R1 | the footer **Clear/Copy** buttons are the wrong size | defect — layout |
+| R2 | no ✕ close icon renders correctly; the Clear / ⓘ Help / ↑↓ glyphs show as empty boxes | defect — icons/fonts |
+| R3 | the toolbar row (search field, Clear, status filter, Help) must share one height | requirement |
+| R4 | the Settings folder-picker button must be as tall as its input | defect — layout |
+| R5 | Settings must become a **separate window with tabs**, and Settings + Help must carry a corner ✕ “like real windows” — not modal-like | requirement |
+| R6 | standardise the height of text inputs, dropdowns, buttons — everything | requirement |
+| R7 | **tray freeze**: with the app in the tray no menu item works and the window never comes back | defect — blocker |
+| R8 | the floating target must be a **small circle with only the logo**, no explanation text, and must accept a dropped link **even while the app is in the tray** | requirement |
+
+### 13.2 R7 — root cause (verified against the sources, not guessed)
+
+`app.rs` hid the window on close with `CancelClose` + `ViewportCommand::Visible(false)`. That
+clears `WS_VISIBLE`; **Windows sends no `WM_PAINT` to a window that is not visible**, and eframe
+paints only on `RedrawRequested`. Tray commands were read inside `App::update`, so after the hide
+the app never ran another frame: the menu was dead, and the very command that should bring the
+window back was waiting for a frame that could never come. Minimizing is no escape either —
+nothing visible means nothing painted (MSDN, *Drawing a Minimized Window*; winit 0.30 keeps its
+own helper window `WS_VISIBLE` with the layered style for exactly this reason).
+
+### 13.3 The fix (three layers)
+
+1. **Hide the way winit hides its helper window.** The window keeps `WS_VISIBLE` and is taken off
+   the screen with the layered style — alpha 0, `WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW`,
+   `WS_EX_APPWINDOW` removed — so it is invisible, click-through, out of the taskbar and out of
+   Alt-Tab while still receiving paints. `windows::reveal_main_window` restores it from any thread.
+2. **The tray no longer waits for a frame.** Two relay threads block on the menu and icon
+   channels, queue the command and wake the UI. The commands that are *about* the window — and
+   any command at all when `frames::is_stale()` (≈1 s) says the UI has stopped delivering frames —
+   restore the window through the OS. `poll()` remains the in-frame fallback.
+3. **A transparent clear colour** for every viewport, so the floating target is a mark on the
+   desktop instead of a dark square, and the frame clock is noted at the top of `update()`.
+
+### 13.4 R1/R3/R4/R6 — one control height, measured
+
+One token (`Spacing::control_height`, 24 pt) and one test that runs the real layout pass: button,
+icon button, text input, combo box and labelled button all measure **24.00 pt**. That took one
+real fix and one measurement fix: `components::text_edit` now pins the height with
+`.min_size(0, control_height)`, and the test reads the rect the **control occupies** — egui 0.29's
+`TextEdit` deliberately shrinks its own reply to the inner text rect
+(`text_edit/builder.rs:416`, “TODO: return full outer_rect”), which is what the earlier red run
+was measuring at 16 pt. The quirk is documented on `components::text_edit` so no caller aligns to
+the wrong rect again.
+
+### 13.5 R2/R5/R8 — carried by the earlier steps
+
+* **R2** — the glyphs are *drawn* (`theme::icons`), not font codepoints; the audit bans the
+  codepoints that produced the boxes (PH-2/PH-3).
+* **R5** — Settings and Help are deferred, decorated viewports with their own ✕; Settings has tabs
+  and a Save/Reload footer (`6a64ead`, extended in `ee8a8ab` / `a783a46`).
+* **R8** — the target is a 76 pt transparent circle carrying only the rdm mark; a drop reports its
+  outcome in the status bar, opens the pre-filled form and reveals the window (PH-7.6).
+
+### 13.6 Verification, and what is still missing
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| The tray fix compiles on Windows | PASS | 37520509055/37520515850 → 37521061557/37521068081 (two annotation-driven rounds) |
+| Every GUI test (99) + the CLI/engine suites | PASS | runs **37522424155** / **37522433273** (`8b03d25`): `test-windows` ✓, `build-gui-windows` ✓ |
+| The control-height contract | PASS | same run; the red run 37521816137 carries the message that named the text input |
+| Tray round trip, and a real drag onto the target | **NOT RUN — NOT_APPLICABLE in this environment** | `UX-ESC-005` (QA); artifact `rdm-gui-windows-x86_64.exe` (5,808,400 bytes) is the hand-off |
+
+### 13.7 Change manifest (round 3)
+
+| File | Action | Scope | Reason | Requirement | Test status | Evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| `rdm-gui/src/windows.rs` | changed | UX / desktop integration | layered hide, OS-level reveal, handle capture | R7 | 2 unit tests + Windows compile | run 37522424155 |
+| `rdm-gui/src/tray.rs` | rewritten | UX / desktop integration | blocking relay threads, command mapping, window escape hatch | R7 | 4 unit tests | run 37522424155 |
+| `rdm-gui/src/frames.rs` | **new** | UX / desktop integration | frame-liveness clock the relay threads consult | R7 | 2 unit tests | run 37522424155 |
+| `rdm-gui/src/app.rs` | changed | UX / desktop integration | transparent clear colour, frame clock, hide/reveal routing, regression guard | R7 | 3 unit tests | run 37522424155 |
+| `rdm-gui/src/main.rs` | changed | UX / desktop integration | remember the window handle before the first frame | R7 | Windows compile | run 37522424155 |
+| `rdm-gui/Cargo.toml` | changed | build (GUI only) | `raw-window-handle = "0.6"` — Windows-only use, already in the tree through `winit` | R7 | Windows compile | run 37522424155 |
+| `rdm-gui/src/theme/components.rs` | changed | UX | the text input pins the shared control height | R1/R3/R6 | the layout test | run 37522424155 |
+| `rdm-gui/src/theme/mod.rs` | changed | UX | the height test measures the control rect and reports the numbers | R3/R6 | the test itself | 37521816137 → 37522424155 |
+| `TEST_INVENTORY.md` | changed | docs | 77 → 99 GUI tests, CI counts and evidence | — | n/a | this file |
+| `audits/ux-designer-execution-plan.md` | changed | docs | PH-8, D-17…D-22, verification rows | — | n/a | this file |
+| `audits/ux-feature-pack-report.md` | changed | docs | this section | — | n/a | this file |
+| `audits/evidence/ux-feature-pack-ci-runs.json` | changed | docs | round-3 run ledger | — | n/a | run ids above |
+
+Nothing outside the UX scope was touched: `.github/workflows/build.yml` is unchanged
+(`UX-ESC-003` still stands for the annotation steps) and no engine, storage or API code moved.

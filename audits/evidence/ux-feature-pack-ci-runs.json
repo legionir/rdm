@@ -142,5 +142,50 @@
     "bug_a": "settings.rs: escape() no longer escapes backslashes; 5-round round-trip test (windows_paths_survive_any_number_of_round_trips) + legacy test (a_legacy_doubled_path_is_preserved_and_no_longer_grows); legacy values are preserved and explained in Settings rather than silently rewritten (ux::doubled_separator_hint, never fires for UNC/extended paths)",
     "bug_b": "main.rs:13 windows_subsystem=windows; util.rs:96-99 CREATE_NO_WINDOW on the only Command::new in rdm-gui",
     "claim_corrected": "an earlier draft/report claimed the loader decoded a legacy doubled backslash; the code preserves it. Report corrected and the real behaviour pinned by a test."
+  },
+  "round_3_2026_10_06": {
+    "trigger": "product-owner report with three screenshots: tray freeze, unequal control heights, Settings/Help as real windows, floating target as a logo-only circle",
+    "rounds": [
+      {
+        "sha": "8ce675d",
+        "runs": [37520509055, 37520515850],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "first compile of the tray fix: windows-sys 0.52 declares `pub type HWND = isize`, not a pointer (13 E0308 casts), and `deliver(cmd, &inbox, &menu_wake)` does not coerce `&Arc<Wake>` to `&Wake` (2 E0277)"
+      },
+      {
+        "sha": "8ed54d1",
+        "runs": [37521061557, 37521068081],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "build green (the whole tray fix compiles); the only failure is theme::tests::every_control_in_a_row_is_control_height_tall — 98 passed / 1 failed"
+      },
+      {
+        "sha": "e413514",
+        "runs": [37521816137, 37521825816],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "same test, now readable in the annotation: 'assertion: text input is 16.00 pt, expected the shared control height 24.00 pt — measured: button 24.00 pt, icon button 24.00 pt, text input 16.00 pt, combo box 24.00 pt, labelled button 24.00 pt'"
+      }
+    ],
+    "green": {
+      "sha": "8b03d25",
+      "runs": [37522424155, 37522433273],
+      "events": {"37522424155": "push", "37522433273": "pull_request"},
+      "conclusion": "success",
+      "jobs": {"test-windows": "success", "build-gui-windows": "success"},
+      "artifact": {"name": "rdm-gui-windows-x86_64.exe", "size_in_bytes": 5808400},
+      "note": "the GUI job builds the release binary, runs `cargo test --release` (the 99 on-disk cases, 0 failed) and uploads the staged exe — that artefact is the hand-off for the desktop smoke test"
+    },
+    "tests_added": {
+      "rdm-gui/src/frames.rs": 2,
+      "rdm-gui/src/tray.rs": 4,
+      "rdm-gui/src/app.rs": 3,
+      "rdm-gui/src/windows.rs": "1 -> 2"
+    },
+    "root_cause": "hiding with `ViewportCommand::Visible(false)` clears WS_VISIBLE; Windows sends no WM_PAINT to an invisible window, eframe paints only on RedrawRequested, and tray commands were read inside App::update — so after the hide no frame ever ran again (minimizing is no escape: nothing visible, nothing painted)",
+    "fix": "layered hide that keeps WS_VISIBLE (windows::hide_main_window / reveal_main_window), tray commands received on two blocking relay threads and applied from a queue, an OS-level reveal for window commands or when frames::is_stale(), and a transparent clear colour for the transparent viewports",
+    "height_contract": "button / icon button / text input / combo box / labelled button = 24.00 pt (Spacing::control_height); `TextEdit` shrinks its reply to the inner rect, so the test measures the rect the control occupies (egui 0.29 text_edit/builder.rs:416)",
+    "not_run": "tray round trip and a real drag-and-drop on a Windows desktop -> UX-ESC-005 (QA); the CI artefact is the hand-off"
   }
 }
