@@ -89,7 +89,9 @@ fn main() -> ExitCode {
         }
     }
 
-    let logging = logging::install(verbosity.unwrap_or("info"));
+    // The log file lives next to the metadata database, so a report from a
+    // frozen window is still readable afterwards (`logging` module docs).
+    let logging = logging::install(verbosity.unwrap_or("info"), Some(&data_dir));
     if let Err(err) = run(data_dir, data_dir_explicit, logging, verbosity) {
         eprintln!("rdm-gui: {err}");
         return ExitCode::from(1);
@@ -120,8 +122,9 @@ fn run(
         options,
         Box::new(move |cc| {
             // The tray's escape hatch needs the window handle *before* the first
-            // frame, and the app needs the context to ask for one.
-            windows::remember_main_window_from(cc);
+            // frame, and the app needs the context to ask for one. (The frame
+            // loop asks again — see `RdmGuiApp::update`.)
+            windows::remember_main_window_from(&*cc);
             match app::RdmGuiApp::new(
                 cc,
                 data_dir.clone(),

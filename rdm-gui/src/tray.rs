@@ -13,36 +13,41 @@
 //!   case in CI), the app keeps working and *falls back to a normal window
 //!   close*, so it can never become unclosable.
 //!
-//! ## Why the events are read on their own threads
+//! ## Why the tray must not need a frame (round 3, second attempt)
 //!
-//! Tray commands are applied inside `App::update`, and `App::update` only runs
-//! when the main window paints. The round-3 report (“the window goes to the
-//! tray and the whole app freezes: no menu item works and the window never comes
-//! back”) was precisely that: the window had been blanked with
-//! `ViewportCommand::Visible(false)`, Windows sends no `WM_PAINT` to a window
-//! that is not visible, so no frame ever ran again and every queued command —
-//! including the one that would have shown the window again — waited for a
-//! frame that could never come.
+//! The round-3 report was “the window goes to the tray and the whole app
+//! freezes: no menu item works and the window never comes back — the Task
+//! Manager is the only way out”. The first fix tried to keep the frame loop
+//! alive while the window was hidden, and the report came back unchanged, so
+//! this module no longer *assumes* anything about painting:
 //!
-//! So this module no longer depends on frames for the two things that must never
-//! be lost:
+//! * the menu itself is drawn by the OS on the app's message pump (the tray
+//!   window belongs to the thread that created the icon), which is why an
+//!   otherwise dead app still shows a menu that opens and looks alive;
+//! * the commands are read on two relay threads that block on
+//!   `MenuEvent::receiver()` / `TrayIconEvent::receiver()` — a *global* channel
+//!   in `muda`, so a click is captured even if the UI thread never runs another
+//!   frame;
+//! * the commands that must never depend on a frame are carried out by the
+//!   relay thread itself, with the OS alone: *Show* and *New download* restore
+//!   the window ([`crate::windows::reveal_main_window`]), and *Quit* restores
+//!   the window **and arms a last-resort exit** ([`FORCE_QUIT_MS`]) so the user
+//!   can never be left with a process only the Task Manager can close;
+//! * the rest (*Pause all*, *Resume all*, the drop-target toggle) are applied
+//!   inside the app because they need its state — and if [`crate::frames`] says
+//!   the UI has stopped delivering frames, the relay brings the window back
+//!   first, because a window that is visible catches up while a dead one never
+//!   will;
+//! * the relay also asks for a repaint after every event, so a healthy app
+//!   reacts within one frame.
 //!
-//! 1. **receiving** a click — one relay thread per channel blocks on
-//!    `MenuEvent::receiver()` / `TrayIconEvent::receiver()`, so a click is
-//!    captured even if the UI thread never runs another frame;
-//! 2. **bringing the window back** — for the commands that are *about* the
-//!    window (`Show`, `New download`), and whenever [`crate::frames`] says the
-//!    UI has stopped delivering frames at all, the relay thread restores the
-//!    window through the OS itself (`windows::reveal_main_window`), which needs
-//!    no frame and no `egui::Context`.
-//!
-//! Everything else is queued in the inbox (plain command values, no `egui`
-//! types) and applied by the app on the next frame; the relay also asks for a
-//! repaint so that frame comes immediately. Touching the native menu is still
-//! restricted to the UI thread and to real changes: refreshing a menu item while
-//! its menu is open is the one thing that can block the UI thread.
+//! Touching the native menu is still restricted to the UI thread and to real
+//! changes: refreshing a menu item while its menu is open is the one thing that
+//! can block the UI thread.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder, TrayIconEvent};
@@ -67,7 +72,7 @@ pub enum TrayCommand {
 impl TrayCommand {
     /// Does this command need the window on screen to mean anything?
     ///
-    /// These two are the ones the relay thread brings back itself, so “show me”
+    /// These two are the ones the relay thread carries out itself, so “show me”
     /// and “new download” work even if the UI thread is not running frames.
     pub fn needs_window(self) -> bool {
         matches!(self, Self::Show | Self::NewDownload)
@@ -76,6 +81,17 @@ impl TrayCommand {
 
 /// The call the relay threads use to wake the UI (`Context::request_repaint`).
 pub type Wake = dyn Fn() + Send + Sync;
+
+/// How long the app gets to exit after a *Quit* click before the tray ends the
+/// process itself (ms).
+///
+/// The graceful path pauses running downloads and stops the backend, which is
+/// capped at five seconds (`backend::shutdown(Duration::from_secs(5))`). Taking
+/// longer than this means the frame loop is not going to apply the command at
+/// all — and the honest alternative to a process only the Task Manager can
+/// close is to close it here. Running downloads resume from their chunk files
+/// on the next start.
+const FORCE_QUIT_MS: u64 = 8_000;
 
 /// Menu-item ids, owned by this struct so a click can be mapped to a command
 /// without touching the menu again.
@@ -152,7 +168,7 @@ impl Tray {
         let menu_ids = ids.clone();
         let menu_inbox = Arc::clone(&inbox);
         let menu_wake = Arc::clone(&wake);
-        if let Err(err) = std::thread::Builder::new()
+        let menu_armed = std::thread::Builder::new()
             .name("rdm-tray-menu".to_string())
             .spawn(move || {
                 while let Ok(event) = MenuEvent::receiver().recv() {
@@ -161,16 +177,12 @@ impl Tray {
                     }
                 }
             })
-        {
-            // The app still works: `poll()` reads the channel itself as a
-            // fallback, it just cannot rescue a window whose frame loop died.
-            tracing::warn!("tray menu relay thread did not start: {err}");
-        }
+            .is_ok();
 
         // Icon clicks (left click / double click restores the window).
         let icon_inbox = Arc::clone(&inbox);
         let icon_wake = Arc::clone(&wake);
-        if let Err(err) = std::thread::Builder::new()
+        let icon_armed = std::thread::Builder::new()
             .name("rdm-tray-icon".to_string())
             .spawn(move || {
                 while let Ok(event) = TrayIconEvent::receiver().recv() {
@@ -182,9 +194,15 @@ impl Tray {
                     }
                 }
             })
-        {
-            tracing::warn!("tray icon relay thread did not start: {err}");
-        }
+            .is_ok();
+
+        // One line the user can read back later: whether the rescue path this
+        // report depended on is actually armed in the running process.
+        tracing::info!(
+            "tray: icon and menu created; relays {} (menu) / {} (icon)",
+            if menu_armed { "armed" } else { "NOT armed" },
+            if icon_armed { "armed" } else { "NOT armed" }
+        );
 
         Some(Tray {
             _icon: tray,
@@ -239,37 +257,93 @@ impl Tray {
     }
 }
 
-/// Queue one command and make sure the app will see it.
+/// Queue one command for the app, wake it — and, for the commands that must
+/// never wait for a frame, carry them out right here.
 ///
 /// Runs on a relay thread: it may touch the inbox, ask for a repaint and use the
 /// OS — never the app.
 fn deliver(command: TrayCommand, inbox: &Mutex<Vec<TrayCommand>>, wake: &Wake) {
+    queue(command, inbox);
+    wake();
+    act(command);
+}
+
+/// Hand one command to the app, in order.
+///
+/// Separate from [`act`] because the two halves are tested differently: the
+/// queue is ordinary data, while acting spends the OS. (It is also what keeps
+/// the ordering test from arming the Quit deadline, which ends the process.)
+fn queue(command: TrayCommand, inbox: &Mutex<Vec<TrayCommand>>) {
     if let Ok(mut queue) = inbox.lock() {
         queue.push(command);
     }
-    wake();
+}
 
-    // “Bring the window back” cannot wait for a frame — that is the whole
-    // failure mode this module exists for. The same escape hatch is used when
-    // the frame clock says the UI has stopped running frames altogether, so a
-    // *Pause all* click is never silently dropped either. In a healthy session
-    // the clock is fresh (the app repaints every 250 ms), so only the two
-    // window commands do this.
-    let stale = crate::frames::is_stale();
-    if command.needs_window() || stale {
-        if crate::windows::reveal_main_window() {
-            if stale && !command.needs_window() {
-                tracing::info!(
-                    "tray: {command:?} — the window had stopped painting, so it was brought \
-                     back to the screen to apply the command"
-                );
-            }
-        } else if stale {
-            tracing::warn!(
-                "tray: {command:?} is waiting for a frame, and no window handle is known to \
-                 bring the window back"
-            );
+/// Everything a relay thread can do about a command without the app: the
+/// commands that must never depend on a frame, and the rescue for the rest.
+fn act(command: TrayCommand) {
+    match command {
+        // “Show me” and “new download” cannot wait: they are what a user clicks
+        // when nothing else works.
+        TrayCommand::Show | TrayCommand::NewDownload => reveal(command),
+        // Quit gets the same treatment plus a deadline (see `arm_force_quit`).
+        TrayCommand::Quit => {
+            reveal(command);
+            arm_force_quit();
         }
+        // These need the app's state, so the app applies them — but a click that
+        // lands in a frame loop that is not running would otherwise vanish, and
+        // “the menu does nothing” is the exact defect this module exists for.
+        _ => {
+            if crate::frames::is_stale() {
+                reveal(command);
+            }
+        }
+    }
+}
+
+/// Restore the window through the OS, and say so either way.
+///
+/// The log lines matter: a report of “the tray does nothing” has to be readable
+/// against what the process tried (the app log, and the log file next to the
+/// metadata database).
+fn reveal(command: TrayCommand) {
+    if crate::windows::reveal_main_window() {
+        tracing::info!("tray: {command:?} — window restored by the tray relay");
+    } else {
+        tracing::warn!(
+            "tray: {command:?} clicked, but no window handle is known — queued for the next \
+             frame instead"
+        );
+    }
+}
+
+/// Arm the last resort for *Quit*: if the app is still running after
+/// [`FORCE_QUIT_MS`], end the process.
+///
+/// Armed once, by a real Quit click, and only reached when the graceful path —
+/// pause the transfers, stop the backend, close the window — did not get there
+/// in time. Without it, a UI thread that stopped painting leaves the user with
+/// a window that cannot be closed and a process that only the Task Manager can
+/// end; with it, the tray’s *Quit* is always true to its name.
+fn arm_force_quit() {
+    static ARMED: AtomicBool = AtomicBool::new(false);
+    if ARMED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("rdm-tray-quit".to_string())
+        .spawn(|| {
+            std::thread::sleep(Duration::from_millis(FORCE_QUIT_MS));
+            // Still here: the frame loop never applied the quit.
+            tracing::warn!(
+                "tray: Quit was not applied within {FORCE_QUIT_MS} ms — exiting anyway \
+                 (running downloads resume from their chunk files)"
+            );
+            std::process::exit(0);
+        });
+    if let Err(err) = spawned {
+        tracing::warn!("tray: could not arm the Quit fallback: {err}");
     }
 }
 
@@ -362,11 +436,12 @@ mod tests {
     #[test]
     fn the_inbox_keeps_order_and_is_taken_exactly_once() {
         let inbox: Mutex<Vec<TrayCommand>> = Mutex::new(Vec::new());
-        let wake: Arc<Wake> = Arc::new(|| {});
-        // `deliver` is what the relay threads call for every click.
-        deliver(TrayCommand::Show, &inbox, &*wake);
-        deliver(TrayCommand::PauseAll, &inbox, &*wake);
-        deliver(TrayCommand::Quit, &inbox, &*wake);
+        // `queue` is the ordering half of what the relay threads call for every
+        // click (`deliver` = queue + wake + act, and `act(Quit)` arms a deadline
+        // that ends the process — not something a test should do).
+        queue(TrayCommand::Show, &inbox);
+        queue(TrayCommand::PauseAll, &inbox);
+        queue(TrayCommand::Quit, &inbox);
 
         let taken = {
             let mut queue = inbox.lock().unwrap();
@@ -379,6 +454,22 @@ mod tests {
         assert!(
             inbox.lock().unwrap().is_empty(),
             "commands must be handed over once, not twice"
+        );
+    }
+
+    #[test]
+    fn the_quit_fallback_waits_for_the_graceful_shutdown() {
+        // `backend::shutdown` is capped at five seconds, and the app only needs
+        // this net when that path never ran. Firing too early would kill a
+        // perfectly healthy shutdown; firing far too late is what the user
+        // experiences as “I had to use the Task Manager”.
+        assert!(
+            FORCE_QUIT_MS > 5_000,
+            "the Quit fallback ({FORCE_QUIT_MS} ms) must not cut off the graceful shutdown"
+        );
+        assert!(
+            FORCE_QUIT_MS <= 15_000,
+            "waiting {FORCE_QUIT_MS} ms for Quit is longer than a user will wait"
         );
     }
 

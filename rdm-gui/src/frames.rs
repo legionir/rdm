@@ -21,10 +21,13 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// After this long without a frame the UI counts as “not running”. The app asks
-/// for a repaint every 250 ms while a tray exists, so a healthy app is four
-/// times faster than this.
-pub const STALE_MS: u64 = 1_000;
+/// After this long without a frame the UI counts as “not running”.
+///
+/// The app asks for a repaint every 250 ms while its window is on screen, and
+/// once a second while it sits in the tray (`app::TRAY_HEARTBEAT_MS`,
+/// `app::TRAY_HIDDEN_HEARTBEAT_MS`), so a healthy app — hidden or not — stays
+/// comfortably inside this window.
+pub const STALE_MS: u64 = 2_000;
 
 static LAST_FRAME_MS: AtomicU64 = AtomicU64::new(0);
 
@@ -89,12 +92,13 @@ mod tests {
 
     #[test]
     fn the_liveness_window_is_longer_than_the_repaint_heartbeat() {
-        // The app asks for a repaint every 250 ms while a tray exists
-        // (`app::TRAY_HEARTBEAT_MS`): the window has to be comfortably longer,
-        // or the relay would keep “rescuing” a perfectly healthy app.
+        // The app asks for a repaint every 250 ms on screen and every 1 000 ms
+        // in the tray (`app::TRAY_HEARTBEAT_MS`, `app::TRAY_HIDDEN_HEARTBEAT_MS`):
+        // the window has to be comfortably longer than the slower of the two, or
+        // the relay would keep “rescuing” a perfectly healthy app.
         assert!(
-            STALE_MS >= 4 * 250,
-            "STALE_MS is {STALE_MS} ms — too close to the 250 ms heartbeat"
+            STALE_MS >= 1_500,
+            "STALE_MS is {STALE_MS} ms — too close to the 1 s heartbeat a hidden window uses"
         );
     }
 }

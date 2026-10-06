@@ -22,10 +22,20 @@ use crate::tray::{Tray, TrayCommand};
 use crate::settings::SettingsStore;
 use crate::state::{DetailTab, FooterPanel, GuiState, PendingConfirm, UiAction};
 
-/// How often a window in the tray asks for a frame (ms). Small enough to feel
-/// instant, large enough to cost nothing. The tray's relay threads add their own
-/// wake-up per click, so this is the *floor*, not the reaction time.
+/// How often the app asks for a frame while the window is on screen and a tray
+/// exists (ms). Small enough to feel instant, large enough to cost nothing. The
+/// tray's relay threads add their own wake-up per click, so this is the *floor*,
+/// not the reaction time.
 const TRAY_HEARTBEAT_MS: u64 = 250;
+
+/// How often it asks while the window is parked in the tray (ms).
+///
+/// The window is invisible to the user — and the point of the round-3 fix is
+/// that it does not need to be *running* frames to answer its tray, because the
+/// relay threads carry the window commands out themselves. This slow tick is
+/// what is left: enough for `frames::is_stale` to tell “idle” from “dead”, and
+/// enough that the state-dependent commands are applied within a second.
+const TRAY_HIDDEN_HEARTBEAT_MS: u64 = 1_000;
 
 /// The background every viewport is cleared with.
 ///
@@ -67,6 +77,10 @@ pub struct RdmGuiApp {
     reveal_requested: bool,
     /// The Settings window (its own OS window since the follow-up round).
     settings_window: crate::views::settings_view::SettingsWindow,
+    /// The main window's OS handle was handed to `crate::windows` (asked once,
+    /// from the first frame — `main.rs` asks the start-up context, and one of
+    /// the two always has the window).
+    window_handle_captured: bool,
 }
 
 impl RdmGuiApp {
@@ -103,6 +117,7 @@ impl RdmGuiApp {
             quit_requested: false,
             reveal_requested: false,
             settings_window: crate::views::settings_view::SettingsWindow::new(),
+            window_handle_captured: false,
         };
         // A `-v` flag on the command line wins over the settings file.
         let level = match forced_level {
@@ -116,6 +131,22 @@ impl RdmGuiApp {
         app.state.push_log(
             "info",
             format!("metadata database: {}", app.backend.db_path().display()),
+        );
+        // Where to look after a report about the tray: the file keeps every
+        // line, including the ones the tray relays write from their threads.
+        // (`app.logging`: the parameter was moved into the app above.)
+        if let Some(file) = app
+            .logging
+            .as_ref()
+            .and_then(LogControl::log_file)
+            .map(|path| path.display().to_string())
+        {
+            app.state.push_log("info", format!("log file: {file}"));
+        }
+        tracing::info!(
+            "rdm-gui {} starting: data dir {}",
+            env!("CARGO_PKG_VERSION"),
+            data_dir.display()
         );
 
         // Tray: absent in sessions without a tray host; the app then closes
@@ -796,11 +827,28 @@ fn confirmed_action(pending: &PendingConfirm, purge: bool) -> UiAction {
 }
 
 impl eframe::App for RdmGuiApp {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
         // The tray's relay threads read this clock: if the UI ever stops
         // delivering frames, they bring the window back with the OS instead of
         // letting a click wait forever (see `crate::frames`).
         crate::frames::note_frame();
+
+        // Second chance for the window handle. `main.rs` asks the start-up
+        // context for it; this asks a live window the same question, so a
+        // session where the first answer was empty still arms the tray's rescue
+        // path. Asked once: the answer cannot change for a window.
+        if !self.window_handle_captured {
+            crate::windows::remember_main_window_from(&*frame);
+            self.window_handle_captured = true;
+            tracing::info!(
+                "tray: main-window handle {}",
+                if crate::windows::main_window_is_known() {
+                    "captured"
+                } else {
+                    "NOT captured — the tray will search for the window instead"
+                }
+            );
+        }
 
         if self.settings.poll_external_change() {
             self.state.settings_dirty = false;
@@ -957,7 +1005,12 @@ impl eframe::App for RdmGuiApp {
                     if in_tray {
                         "window hidden — rdm keeps running in the tray (Quit there to exit)"
                     } else {
-                        "window minimized — rdm keeps running (Quit from the tray to exit)"
+                        // The tray is there but the window could not be taken
+                        // off the screen, so it stays open and visible: saying
+                        // “minimized” here would describe something that never
+                        // happened.
+                        "could not hide the window (no window handle known) — rdm stays \
+                         on screen; use Quit in the tray to exit"
                     },
                 );
             } else {
@@ -996,11 +1049,18 @@ impl eframe::App for RdmGuiApp {
         let refresh = self.settings.settings().refresh_ms.max(100);
         let mut interval = if busy { refresh.min(500) } else { refresh };
         // A window hidden in the tray only runs a frame when something asks it
-        // to, and tray commands are read inside a frame. A live tray therefore
-        // keeps a short heartbeat; without it the hidden window looks frozen
-        // and the menu appears to do nothing.
+        // to, and the state-dependent tray commands (*Pause all*, *Resume all*,
+        // the drop-target toggle) are read inside a frame. A live tray therefore
+        // keeps a heartbeat: short while the window is on screen, slow while it
+        // is in the tray, where a click also wakes the app and the two commands
+        // that must never wait are carried out by the relay thread itself.
         if self.tray.is_some() {
-            interval = interval.min(TRAY_HEARTBEAT_MS);
+            let heartbeat = if crate::windows::main_window_is_hidden() {
+                TRAY_HIDDEN_HEARTBEAT_MS
+            } else {
+                TRAY_HEARTBEAT_MS
+            };
+            interval = interval.min(heartbeat);
         }
         ctx.request_repaint_after(Duration::from_millis(interval));
     }
@@ -1035,18 +1095,28 @@ mod tests {
 
     #[test]
     fn the_tray_hide_path_never_blanks_the_window() {
-        // Regression guard for the round-3 report. `Visible(false)` clears
-        // `WS_VISIBLE`; Windows then sends no `WM_PAINT`, so the frame loop stops
-        // for good and *every* tray command — including “Show rdm” — waits for a
-        // frame that can never come. The window must be taken off the screen in
-        // a way that keeps it painting.
+        // Regression guard for the round-3 report — twice, because the first
+        // fix passed the first half of this test and the freeze came back.
+        //
+        // `Visible(false)` clears `WS_VISIBLE`, and minimizing leaves nothing on
+        // screen: either way Windows sends no `WM_PAINT`, the frame loop stops
+        // for good, and *every* tray command — including “Show rdm” — waits for
+        // a frame that can never come. The window must be taken off the screen
+        // in a way that keeps it painting.
         let source = include_str!("app.rs");
         // Built from two halves so this test does not trip over its own text.
-        let forbidden = format!("{}{}", "ViewportCommand::Visible(", "false)");
-        assert!(
-            !source.contains(&forbidden),
-            "the window is blanked again — that stops the frame loop and kills the tray"
-        );
+        for (forbidden, why) in [
+            (
+                format!("{}{}", "ViewportCommand::Visible(", "false)"),
+                "the window is blanked again — that stops the frame loop and kills the tray",
+            ),
+            (
+                format!("{}{}", "ViewportCommand::Minimized(", "true)"),
+                "minimizing stops the paint stream just as reliably as blanking the window",
+            ),
+        ] {
+            assert!(!source.contains(&forbidden), "{why}");
+        }
         for needed in [
             "crate::windows::hide_main_window()",
             "crate::windows::reveal_main_window()",
@@ -1061,6 +1131,20 @@ mod tests {
         assert!(
             TRAY_HEARTBEAT_MS <= 250,
             "a click must not wait longer than a quarter second for a frame"
+        );
+        // In the tray the window is invisible and its commands are carried out
+        // by the relay threads, so the tick may be slower — but not so slow that
+        // `frames::is_stale` (used to decide whether a click needs rescuing)
+        // would report a healthy app as dead.
+        assert!(
+            TRAY_HIDDEN_HEARTBEAT_MS >= 500,
+            "an invisible window has no reason to repaint every {TRAY_HIDDEN_HEARTBEAT_MS} ms"
+        );
+        assert!(
+            TRAY_HIDDEN_HEARTBEAT_MS + 250 < crate::frames::STALE_MS,
+            "the hidden heartbeat must stay well inside the liveness window \
+             ({TRAY_HIDDEN_HEARTBEAT_MS} ms vs {})",
+            crate::frames::STALE_MS
         );
     }
 }
