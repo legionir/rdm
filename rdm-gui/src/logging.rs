@@ -56,11 +56,6 @@ impl LogBuffer {
         }
     }
 
-    /// The file this buffer appends to (also used to build writers).
-    pub fn log_file(&self) -> LogFile {
-        self.file.clone()
-    }
-
     fn push(&self, raw: &str) {
         let raw = raw.trim_end();
         if raw.is_empty() {
@@ -78,6 +73,9 @@ impl LogBuffer {
             level,
             text: text.to_string(),
         });
+        // The file gets the same line here, the one place every line passes
+        // through: the window's App log is gone exactly when it is needed most.
+        self.file.append(raw);
     }
 
     /// Take everything captured since the last call.
@@ -150,11 +148,10 @@ impl LogFile {
     }
 }
 
-/// Writer handed to the `fmt` layer; appends whole lines to the buffer and the
-/// log file.
+/// Writer handed to the `fmt` layer; appends whole lines to the buffer (which
+/// passes each one on to the log file).
 pub struct BufferWriter {
     buffer: LogBuffer,
-    file: LogFile,
 }
 
 impl io::Write for BufferWriter {
@@ -162,7 +159,6 @@ impl io::Write for BufferWriter {
         let text = String::from_utf8_lossy(buf);
         for line in text.lines() {
             self.buffer.push(line);
-            self.file.append(line);
         }
         Ok(buf.len())
     }
@@ -178,9 +174,6 @@ impl<'a> MakeWriter<'a> for LogBuffer {
     fn make_writer(&'a self) -> Self::Writer {
         BufferWriter {
             buffer: self.clone(),
-            // The handle travels with the buffer: `LogBuffer` is what `install`
-            // gives the subscriber, and the writer is created per log line.
-            file: self.log_file(),
         }
     }
 }
@@ -261,7 +254,7 @@ mod tests {
         // No directory to write to: the app must keep working, not refuse to
         // start over a log file.
         let buffer = LogBuffer::with_file(LogFile::open(None));
-        assert!(buffer.log_file().path.is_none());
+        assert!(buffer.file.path.is_none());
         buffer.push("INFO still captured in the window");
         assert_eq!(buffer.drain().len(), 1);
     }

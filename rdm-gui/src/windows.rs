@@ -422,14 +422,23 @@ mod tests {
         // window with a minimize/restore pair: a minimized window has nothing
         // on screen to paint, so the frame loop dies exactly as it does with
         // `Visible(false)`. `SW_MINIMIZE` must not appear in the code at all.
-        let source = include_str!("windows.rs");
+        // Comments are stripped first: the module *documents* this trap, and a
+        // guard that matched its own explanation (or this test's needles) would
+        // be worse than no guard.
+        let code = include_str!("windows.rs")
+            .lines()
+            .map(|line| line.split("//").next().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Both needles are built from two halves so they cannot be found in
+        // this test itself.
+        let minimize = format!("{}{}", "SW_", "MINIMIZE");
         assert!(
-            !source.contains("SW_MINIMIZE"),
+            !code.contains(&minimize),
             "minimizing the window stops WM_PAINT — and with it every tray command"
         );
-        // Built from two halves so the test does not trip over its own text.
         let forbidden = format!("{}{}", "ViewportCommand::Minimized(", "true)");
-        assert!(!source.contains(&forbidden), "same trap, other spelling");
+        assert!(!code.contains(&forbidden), "same trap, other spelling");
     }
 
     #[test]

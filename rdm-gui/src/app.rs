@@ -1000,6 +1000,9 @@ impl eframe::App for RdmGuiApp {
                 // The OS-level hide is undone by `windows::reveal_main_window`,
                 // which the tray's relay thread can call with no frame at all.
                 let in_tray = crate::windows::hide_main_window();
+                // Also straight to the log file: this decision is the first
+                // question any “it froze in the tray” report has to answer.
+                tracing::info!("tray: hide_main_window -> {in_tray}");
                 self.state.push_log(
                     "info",
                     if in_tray {
@@ -1025,6 +1028,7 @@ impl eframe::App for RdmGuiApp {
 
         if self.reveal_requested {
             self.reveal_requested = false;
+            tracing::info!("tray: reveal requested — restoring the window");
             // Undo the tray hide. The relay thread may already have done it
             // through the OS (that is how “Show rdm” works with no frame
             // running), and both calls are idempotent; `Focus` also covers the
