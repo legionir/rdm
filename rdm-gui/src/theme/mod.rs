@@ -3,6 +3,7 @@
 //! * [`tokens`] — palette, spacing scale, radii, typography, sizes, breakpoints
 //! * [`contrast`] — WCAG maths plus the role→surface contract the palette obeys
 //! * [`components`] — the small widget vocabulary every screen reuses
+//! * [`icons`] — drawn icons (no font glyphs, so nothing can render as a box)
 //!
 //! Views read tokens through [`palette_of`] / [`palette_ctx`]; only [`install`]
 //! touches `egui::Visuals`, so a theme change is a single edit here.
@@ -12,9 +13,11 @@
 
 pub mod components;
 pub mod contrast;
+pub mod icons;
 pub mod tokens;
 
 pub use components::Level;
+pub use icons::Icon;
 pub use tokens::{
     state_glyph, Breakpoints, LayoutMode, Palette, Radii, Sizes, Spacing, Table, Tokens, Typography,
 };

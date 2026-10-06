@@ -20,6 +20,10 @@ use crate::platform::ImportBus;
 use crate::tray::{Tray, TrayCommand};
 use crate::settings::SettingsStore;
 use crate::state::{DetailTab, FooterPanel, GuiState, PendingConfirm, UiAction};
+
+/// How often a hidden window wakes up to serve the tray menu (ms). Small enough
+/// to feel instant, large enough to cost nothing.
+const TRAY_HEARTBEAT_MS: u64 = 250;
 use crate::theme::{self, components, Sizes, Spacing};
 use crate::ux::{self, BulkAction, Confirm};
 use crate::util;
@@ -57,7 +61,6 @@ impl RdmGuiApp {
         data_dir_explicit: bool,
         logging: Option<LogControl>,
         forced_level: Option<&'static str>,
-        ctx: egui::Context,
     ) -> anyhow::Result<Self> {
         let backend = Backend::new(&data_dir)?;
         let settings = SettingsStore::new(&data_dir, data_dir_explicit);
@@ -101,7 +104,7 @@ impl RdmGuiApp {
 
         // Tray: absent in sessions without a tray host; the app then closes
         // normally instead of hiding into a tray that is not there.
-        app.tray = Tray::new(app.drop_target_shown, ctx);
+        app.tray = Tray::new(app.drop_target_shown);
         if app.tray.is_none() {
             app.state
                 .push_log("warn", "no system tray available — closing the window will quit");
@@ -507,12 +510,17 @@ impl RdmGuiApp {
     /// drop target, or pushed by the tray). Opening the form also brings the
     /// window back from the tray.
     fn drain_imports(&mut self, _ctx: &Context) {
-        let urls: Vec<String> = self
-            .imports
-            .drain()
-            .into_iter()
-            .chain(self.drop_zone.drain())
-            .collect();
+        // Drops on the floating target arrive with their own outcome sentence:
+        // a drop that carried no readable link says so, and it tells the user
+        // when the clipboard was used instead.
+        let mut urls: Vec<String> = Vec::new();
+        for drop in self.drop_zone.drain() {
+            self.state.push_log("info", drop.note);
+            if let Some(url) = drop.url {
+                urls.push(url);
+            }
+        }
+        urls.extend(self.imports.drain());
         if urls.is_empty() {
             return;
         }
@@ -813,16 +821,6 @@ impl eframe::App for RdmGuiApp {
                 tray.set_drop_target_shown(wanted_target);
             }
         }
-        if self.drop_zone.take_hide_request() {
-            self.drop_target_shown = false;
-            self.settings.settings_mut().drop_target_enabled = false;
-            let _ = self.settings.save();
-            self.state.push_log(
-                "info",
-                "floating drop target hidden — turn it back on in Settings",
-            );
-        }
-
         let mut actions: Vec<UiAction> = Vec::new();
         let active_jobs = self.backend.active_jobs();
         let queued = self.state.queue.len();
@@ -956,11 +954,15 @@ impl eframe::App for RdmGuiApp {
                 .iter()
                 .any(|r| r.state.active() || r.state == DownloadState::Merging);
         let refresh = self.settings.settings().refresh_ms.max(100);
-        ctx.request_repaint_after(Duration::from_millis(if busy {
-            refresh.min(500)
-        } else {
-            refresh
-        }));
+        let mut interval = if busy { refresh.min(500) } else { refresh };
+        // A window hidden in the tray only runs a frame when something asks it
+        // to, and tray commands are read inside a frame. A live tray therefore
+        // keeps a short heartbeat; without it the hidden window looks frozen
+        // and the menu appears to do nothing.
+        if self.tray.is_some() {
+            interval = interval.min(TRAY_HEARTBEAT_MS);
+        }
+        ctx.request_repaint_after(Duration::from_millis(interval));
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

@@ -433,6 +433,12 @@ pub fn drop_accepted(url: &str) -> String {
     format!("Link accepted — the New download form opened with {url}")
 }
 
+/// A drop carried no readable link, but the clipboard had one — say both, so
+/// nobody has to guess where the form got its URL from.
+pub fn drop_used_clipboard(url: &str) -> String {
+    format!("That drop carried no readable link — used the clipboard link instead: {url}")
+}
+
 /// Hint shown under a path field whose value still carries the doubled
 /// separators written by rdm versions before the Bug-A fix.
 ///
@@ -550,6 +556,7 @@ mod tests {
             copy.push(restart_tooltip(state).to_string());
         }
         copy.push(DOUBLED_SEPARATOR_HINT.to_string());
+        copy.push(drop_used_clipboard("https://example.com/y.zip"));
         copy.push(legend_tooltip());
         copy.push(resume_all_outcome(3, 2));
         copy.push(resume_all_outcome(0, 2));
