@@ -16,6 +16,10 @@ rdm = { path = ".." }
 arboard = "3.4"
 # System tray (icon + menu) and its menu primitives.
 tray-icon = "0.26"
+# The main window's native handle: the tray restores the window with the OS
+# when the frame loop is not running (Windows only, and already in the tree as a
+# dependency of `winit`).
+raw-window-handle = "0.6"
 # Work-area query for the floating drop target (Windows only).
 windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi"] }
 egui = "=0.29.1"

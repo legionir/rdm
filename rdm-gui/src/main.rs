@@ -16,6 +16,7 @@ mod app;
 mod backend;
 mod clipboard;
 mod dropzone;
+mod frames;
 mod icon;
 mod logging;
 mod platform;
@@ -117,8 +118,12 @@ fn run(
     eframe::run_native(
         "RDM",
         options,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
+            // The tray's escape hatch needs the window handle *before* the first
+            // frame, and the app needs the context to ask for one.
+            windows::remember_main_window_from(cc);
             match app::RdmGuiApp::new(
+                cc,
                 data_dir.clone(),
                 data_dir_explicit,
                 logging.clone(),

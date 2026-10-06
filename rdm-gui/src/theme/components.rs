@@ -149,6 +149,12 @@ pub fn text_edit(ui: &mut Ui, value: &mut String, width: f32, hint: &str) -> Res
         egui::TextEdit::singleline(value)
             .hint_text(hint)
             .desired_width(width)
+            // The height is the shared *control* height, not “one text row plus
+            // margins”: the row alone is ≈22.4 pt, so without this the input
+            // sits shorter than the button beside it — round 3’s “standardise
+            // the heights” report, and the last red test in
+            // `theme::tests::every_control_in_a_row_is_control_height_tall`.
+            .min_size(egui::vec2(0.0, spacing.control_height))
             .margin(egui::Margin::symmetric(spacing.sm, spacing.xs)),
     )
 }

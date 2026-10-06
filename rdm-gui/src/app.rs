@@ -6,6 +6,7 @@
 //! a modal opened by double-clicking a row.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use egui::Context;
@@ -21,9 +22,20 @@ use crate::tray::{Tray, TrayCommand};
 use crate::settings::SettingsStore;
 use crate::state::{DetailTab, FooterPanel, GuiState, PendingConfirm, UiAction};
 
-/// How often a hidden window wakes up to serve the tray menu (ms). Small enough
-/// to feel instant, large enough to cost nothing.
+/// How often a window in the tray asks for a frame (ms). Small enough to feel
+/// instant, large enough to cost nothing. The tray's relay threads add their own
+/// wake-up per click, so this is the *floor*, not the reaction time.
 const TRAY_HEARTBEAT_MS: u64 = 250;
+
+/// The background every viewport is cleared with.
+///
+/// eframe clears *every* window with this one colour, whatever is painted in it.
+/// The app has two transparent windows — the floating drop target and (for the
+/// duration of the animation) nothing else — so a semi-transparent clear left a
+/// **dark square** around the drop target's circle instead of a floating mark.
+/// `[0, 0, 0, 0]` contributes nothing; the opaque panels of the main window and
+/// the settings/help windows paint their own area, so they are unchanged.
+pub const CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 use crate::theme::{self, components, Sizes, Spacing};
 use crate::ux::{self, BulkAction, Confirm};
 use crate::util;
@@ -59,6 +71,7 @@ pub struct RdmGuiApp {
 
 impl RdmGuiApp {
     pub fn new(
+        cc: &eframe::CreationContext<'_>,
         data_dir: PathBuf,
         data_dir_explicit: bool,
         logging: Option<LogControl>,
@@ -107,7 +120,16 @@ impl RdmGuiApp {
 
         // Tray: absent in sessions without a tray host; the app then closes
         // normally instead of hiding into a tray that is not there.
-        app.tray = Tray::new(app.drop_target_shown);
+        //
+        // The relay threads wake the UI with a repaint request — safe from any
+        // thread, and it only schedules a frame. Their real escape hatch is the
+        // OS-level window restore in `tray::deliver`, which needs no frame at
+        // all (see `tray.rs` for the round-3 failure this covers).
+        let wake_ctx = cc.egui_ctx.clone();
+        let wake: Arc<crate::tray::Wake> = Arc::new(move || {
+            wake_ctx.request_repaint_of(egui::ViewportId::ROOT);
+        });
+        app.tray = Tray::new(app.drop_target_shown, wake);
         if app.tray.is_none() {
             app.state
                 .push_log("warn", "no system tray available — closing the window will quit");
@@ -775,6 +797,11 @@ fn confirmed_action(pending: &PendingConfirm, purge: bool) -> UiAction {
 
 impl eframe::App for RdmGuiApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // The tray's relay threads read this clock: if the UI ever stops
+        // delivering frames, they bring the window back with the OS instead of
+        // letting a click wait forever (see `crate::frames`).
+        crate::frames::note_frame();
+
         if self.settings.poll_external_change() {
             self.state.settings_dirty = false;
             self.state
@@ -913,10 +940,25 @@ impl eframe::App for RdmGuiApp {
                 && !self.quit_requested;
             if hide {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                // Put the window in the tray *without* blanking it — see
+                // `windows::hide_main_window` for the whole reason. In short: a
+                // window that is not visible to Windows receives no `WM_PAINT`,
+                // the frame loop stops for good, and every tray command
+                // (including the one that would show the window again) waits for
+                // a frame that can never come. That was the round-3 freeze, and
+                // it is also why the window is not simply minimized: nothing
+                // visible means nothing painted.
+                //
+                // The OS-level hide is undone by `windows::reveal_main_window`,
+                // which the tray's relay thread can call with no frame at all.
+                let in_tray = crate::windows::hide_main_window();
                 self.state.push_log(
                     "info",
-                    "window hidden — rdm keeps running in the tray (Quit there to exit)",
+                    if in_tray {
+                        "window hidden — rdm keeps running in the tray (Quit there to exit)"
+                    } else {
+                        "window minimized — rdm keeps running (Quit from the tray to exit)"
+                    },
                 );
             } else {
                 self.shutting_down = true;
@@ -930,6 +972,12 @@ impl eframe::App for RdmGuiApp {
 
         if self.reveal_requested {
             self.reveal_requested = false;
+            // Undo the tray hide. The relay thread may already have done it
+            // through the OS (that is how “Show rdm” works with no frame
+            // running), and both calls are idempotent; `Focus` also covers the
+            // case where only the taskbar style was missing.
+            crate::windows::reveal_main_window();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
@@ -962,6 +1010,58 @@ impl eframe::App for RdmGuiApp {
             self.shutting_down = true;
             self.backend.shutdown(Duration::from_secs(5));
         }
+    }
+
+    /// See [`CLEAR_COLOR`]: transparent, so the floating drop target is a mark
+    /// floating on the desktop rather than a dark square.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        CLEAR_COLOR
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_background_is_transparent_so_transparent_windows_are_clean() {
+        assert_eq!(
+            CLEAR_COLOR[3], 0.0,
+            "the clear colour must contribute no colour: eframe clears every viewport \
+             with it, including the transparent floating drop target"
+        );
+        assert_eq!(CLEAR_COLOR, [0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn the_tray_hide_path_never_blanks_the_window() {
+        // Regression guard for the round-3 report. `Visible(false)` clears
+        // `WS_VISIBLE`; Windows then sends no `WM_PAINT`, so the frame loop stops
+        // for good and *every* tray command — including “Show rdm” — waits for a
+        // frame that can never come. The window must be taken off the screen in
+        // a way that keeps it painting.
+        let source = include_str!("app.rs");
+        // Built from two halves so this test does not trip over its own text.
+        let forbidden = format!("{}{}", "ViewportCommand::Visible(", "false)");
+        assert!(
+            !source.contains(&forbidden),
+            "the window is blanked again — that stops the frame loop and kills the tray"
+        );
+        for needed in [
+            "crate::windows::hide_main_window()",
+            "crate::windows::reveal_main_window()",
+            "crate::frames::note_frame()",
+        ] {
+            assert!(source.contains(needed), "the tray path lost `{needed}`");
+        }
+    }
+
+    #[test]
+    fn the_heartbeat_is_short_enough_to_feel_instant() {
+        assert!(
+            TRAY_HEARTBEAT_MS <= 250,
+            "a click must not wait longer than a quarter second for a frame"
+        );
     }
 }
 
