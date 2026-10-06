@@ -271,7 +271,21 @@ pub struct Spacing {
     pub interact: Vec2,
     /// Table row height (the column padding lives in [`Table`]).
     pub row_height: f32,
+    /// The room between an icon and the text it belongs to: a state icon in
+    /// the table, the glyph inside a labelled button.
     pub icon_gap: f32,
+    /// Icon inside a labelled button (“New download”, “Settings”).
+    ///
+    /// A painted icon has no advance width, so a `Button` cannot reserve a slot
+    /// for it; `theme::components::icon_text_layout` sizes the control from this
+    /// token instead (round-5 report: the icon sat in the label's ink).
+    pub icon_in_button: f32,
+    /// Inner padding of a standalone window (Help, Settings).
+    ///
+    /// Those two draw their own panel frame; `Frame::none()` left the headings
+    /// and labels flush against the window edges (round-5 report), so the
+    /// padding is a token they both read (`theme::window_frame`).
+    pub window_padding: Vec2,
     /// Activity spinner next to the "running here" counter.
     pub spinner: f32,
 }
@@ -296,6 +310,10 @@ impl Default for Spacing {
             interact: Vec2::new(44.0, 24.0),
             row_height: 42.0,
             icon_gap: 5.0,
+            // Exactly the control's inner height (`control_height` minus
+            // `button.y` twice): the tallest slot the frame leaves.
+            icon_in_button: 16.0,
+            window_padding: Vec2::new(12.0, 10.0),
             spinner: 14.0,
         }
     }

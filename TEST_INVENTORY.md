@@ -22,7 +22,7 @@
 - src/cli/commands.rs: 7 new (parse_checksum ×3, opts_parse ×3, connections_range)
 - tests/cli_real.rs: 2 new (help/version, bad-url graceful)
 
-## GUI tests (rdm-gui/src/) — 104 tests
+## GUI tests (rdm-gui/src/) — 109 tests
 - app.rs: 3 (transparent clear colour for the transparent viewports; the tray hide path
   never blanks **or minimizes** the window — source guard against `ViewportCommand::Visible(false)`
   and `ViewportCommand::Minimized(true)`; the repaint heartbeat is short enough to feel instant,
@@ -44,19 +44,27 @@
   the drop target)
 - frames.rs: 2 (a fresh frame is never stale, an old one is; the liveness window is
   comfortably longer than both heartbeats — 250 ms on screen, 1 s in the tray)
-- tray.rs: 5 (every menu id maps to its command and nothing else does; only `Show` /
+- tray.rs: 7 (every menu id maps to its command and nothing else does; only `Show` /
   `New download` need the window — the list is a contract; the inbox keeps order and is
   handed over exactly once; the Quit deadline outlives the graceful shutdown and stays
-  inside what a user will wait; the drop-target item says its state in words, no ✓ glyph)
+  inside what a user will wait; the drop-target item says its state in words, no ✓ glyph;
+  **a right click opens the menu and nothing else** — right/down, right/up and the right
+  double click never restore the window, which is what used to dismiss that menu;
+  only a *finished* left click (or the left double click) is `Show`, so one click is one
+  command)
 - logging.rs: 4 (level splitting, buffer order/drain, every line also lands in the log file,
   a missing data directory disables the file without failing)
 - theme/tokens.rs: 5 (state/chunk/log coverage, state distinguishability, zebra tint, breakpoints)
 - theme/contrast.rs: 5 (WCAG maths, contract in both themes, worst-pair margin, focus ring, name resolution)
 - theme/icons.rs: 3 (drawn glyph geometry: closed shapes, stroke inside the rect, state mapping)
-- theme/mod.rs: 5 (design guards: no colour literals in views, every view uses `theme::`,
+- theme/mod.rs: 6 (design guards: no colour literals in views, every view uses `theme::`,
   sidebar cap, theme reversibility, and the control-height contract — button, icon button,
-  text input, combo box and labelled button all measure `Spacing::control_height` (24 pt))
-- theme/components.rs: 2 (row-background precedence, banner severities)
+  text input, combo box and labelled button all measure `Spacing::control_height` (24 pt);
+  a window panel insets its content by `Spacing::window_padding`, measured in a real
+  layout pass — the Help/Settings “content glued to the edges” fix)
+- theme/components.rs: 4 (row-background precedence, banner severities; the labelled
+  button's geometry — the icon keeps `Spacing::icon_gap` from the label for every label
+  width, and icon and label sit on the control's midline)
 - views/download_list.rs: 4 (responsive column fitting, optional-column drop order, width invariant)
 - views/help_overlay.rs: 2 (the help window closes through one flag; its sections stay in sync
   with the glossary)
@@ -83,7 +91,9 @@
 - theme/tokens.rs: 5 (state/chunk/log coverage, state distinguishability, zebra tint, breakpoints)
 - theme/contrast.rs: 5 (WCAG maths, contract in both themes, worst-pair margin, focus ring, name resolution)
 - theme/mod.rs: 4 (design guards: no colour literals in views, every view uses `theme::`, sidebar cap, theme reversibility)
-- theme/components.rs: 2 (row-background precedence, banner severities)
+- theme/components.rs: 4 (row-background precedence, banner severities; the labelled
+  button's geometry — the icon keeps `Spacing::icon_gap` from the label for every label
+  width, and icon and label sit on the control's midline)
 - views/download_list.rs: 4 (responsive column fitting, optional-column drop order, width invariant)
 - ux.rs: 14 (UX policy: confirmation scope and consequence copy, safe-option naming, bulk
   count/zero-case copy, drop-all threshold, resume-all outcome naming failed downloads,
@@ -100,6 +110,12 @@ UX layer: `rdm-gui/src/ux.rs` is the single source of truth for confirmation
 policy, consequence copy, the state legend, bulk-action microcopy and the
 glossary; `audits/ux-terminology-check.py` enforces the same rules statically
 over CLI help, the GUI strings and the README.
+
+Round 5 (the tray right-click, the window padding and the icon/label gap) keeps the
+same shape: the tray decision is a pure function (`command_for_icon_event`), the button
+geometry is a pure function (`icon_text_layout`) and the window padding is measured in a
+real `Context` layout pass, so all three are ordinary unit tests rather than a screenshot
+review.
 
 ## CI (after ci/ci-tests.patch)
 - test-windows (cargo test --all-targets) — the CLI + engine suites

@@ -404,3 +404,81 @@ frames, a queue is read by nobody — including the command that would have rest
 | `rdm-gui/src/main.rs` | changed | UX (diagnostics) | pass the data directory to the logger | R7 | Windows compile | run 37535678990 |
 
 Nothing outside the UX scope moved; the workflow file is untouched (`UX-ESC-003`).
+
+## 15. Round 5 — the tray menu, the window padding, the icon/label gap
+
+Round 5 is a bug round: three reports from the running app, all of them geometry or
+event-routing rather than missing features. Each one is pinned to a line of code (or of
+upstream code) so it cannot come back as “looked fine on this machine”.
+
+### 15.1 The reports
+
+| # | Report (as received) | Visible effect |
+| --- | --- | --- |
+| R5-1 | “With the window in the tray, a **right** click opens the menu and it closes at once, and the window comes to the front. A right click should only show the menu.” | The tray menu was unusable: the window it summoned dismissed the menu that summoned it |
+| R5-2 | “Help and Settings have no padding around them — the content is glued to the edges.” | Headings, labels and separators sat against the title bar and the window frame |
+| R5-3 | “In buttons with an icon, the icon is stuck to the button's text.” | The toolbar's “New download” / “Queue” / “Settings” icons touched the label's first glyph |
+
+### 15.2 Root causes
+
+**R5-1 — every tray click was a “Show”, including the one that opened the menu.**
+`tray-icon` 0.26 on Windows delivers a `TrayIconEvent::Click` for *every* button and
+*both* edges (`platform_impl/windows/mod.rs`: `WM_LBUTTONDOWN …UP`, `WM_RBUTTONDOWN …UP`,
+`WM_MBUTTONDOWN …UP`), and — separately — shows the menu itself on the right-button
+release (`if menu_on_right_click && WM_RBUTTONUP … show_tray_menu()`). Both of this app's
+readers of that channel (`rdm-tray-icon` relay thread and `Tray::poll`) matched
+`TrayIconEvent::Click { .. } | DoubleClick { .. }` without looking at the button at all,
+so the right click that had just opened the menu was turned into `TrayCommand::Show` →
+`windows::reveal_main_window()` → `SetForegroundWindow` on the main window, which took the
+foreground away from the popup and dismissed it. The window arriving and the menu
+vanishing are the *same* event, which is why they always happened together.
+
+**R5-2 — both windows drew their content in `Frame::none()`.**
+`views/help_overlay.rs` and `views/settings_view.rs` are deferred viewports with their own
+`CentralPanel`; both passed `.frame(egui::Frame::none().fill(palette.surface))`, and
+`Frame::none()` insets nothing — `CentralPanel::default()` would at least have used
+`spacing.window_margin`. Nothing in the token layer described a window's inner padding, so
+there was nothing to notice.
+
+**R5-3 — the icon's slot was three literal spaces.**
+`components::icon_text_button` was `Button::new(format!("   {label}"))` with the icon
+painted at a fixed inset (`spacing.sm` from the left, `control_height - 2·xs` wide). How
+much room the label left for that slot was therefore the width of three spaces in the
+button font — a property of the *font*, not of the layout. On the shipped font the label's
+ink began inside the icon's rectangle: the two overlapped, which reads as “glued”.
+egui cannot reserve the slot itself: a painted icon has no advance width (that is exactly
+why `theme::icons` exists and glyphs are banned).
+
+### 15.3 What changed
+
+| Report | Change | Where |
+| --- | --- | --- |
+| R5-1 | `command_for_icon_event(&TrayIconEvent) -> Option<TrayCommand>`: the single place that maps an icon event to a command. `Show` requires `MouseButton::Left` **and** `MouseButtonState::Up` (or the left double click); right, middle, enter/move/leave and the left button's *press* map to `None` — the press half would otherwise make one click two commands, and the double click already ends in `Up`. Both readers of the channel (relay thread, `Tray::poll`) go through it, so they cannot disagree | `rdm-gui/src/tray.rs` |
+| R5-2 | `theme::window_frame(&palette)`: panel fill + `Spacing::window_padding` (`Margin::symmetric(12, 10)`) as its inner margin. Both windows call it; the help window's extra `add_space(xs)` (a substitute for the padding) is gone | `rdm-gui/src/theme/mod.rs`, `views/help_overlay.rs`, `views/settings_view.rs` |
+| R5-3 | `components::icon_text_layout(label_size, &spacing) -> IconTextLayout` computes the control (`padding + icon + gap + label + padding`), the icon's rect and the label's origin from tokens only; `icon_text_button` measures the label with the button font, builds `Button::new("").min_size(layout.size)` for the frame/hover/click, reports the label through `WidgetInfo::labeled` (an empty `Button` has no accessible name) and paints the icon and the label itself. Two new tokens: `Spacing::icon_in_button` (16 pt) and the existing `icon_gap` (5 pt) as the icon↔label distance | `rdm-gui/src/theme/components.rs`, `theme/tokens.rs` |
+
+### 15.4 Verification
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| The three decisions are pure functions, covered by unit tests | PASS | `tray.rs`: right/down, right/up and right double click → `None`, left/up and left double click → `Show`, left/down and the middle button → `None`; `components.rs`: `icon_label_gap() ≥ Spacing::icon_gap` for label widths 0…156 pt, icon and label on the control's midline; `theme/mod.rs`: the first widget of a `window_frame` panel lands on the window padding in a real `Context` layout pass |
+| The upstream event stream the tray fix depends on | Read, not guessed | `tray-icon` 0.26.0 `src/platform_impl/windows/mod.rs` (`tray_proc`) and `src/lib.rs` (`MouseButton`, `MouseButtonState`, `TrayIconEvent`); the menu is shown by the library, on the right-button release |
+| The whole GUI crate still parses | PASS | `tree-sitter` (Rust grammar) over all 29 `rdm-gui` sources: zero `ERROR`/missing nodes (the checker was itself validated against a deliberately broken file) |
+| Design guards and audit scripts | PASS | `audits/ui-contrast-check.py`: token discipline (9 UI files, no colour literals), “every declared token field has a default”, delimiters balanced in 29 files; `audits/ux-terminology-check.py`: PASS (no new user-facing copy) |
+| Windows compile + 109 GUI tests | see the CI row below | `build-gui-windows` / `test-windows` on the branch push |
+| The tray on a real desktop | **NOT RUN in this environment** | Same escape as round 4 (`UX-ESC-005`): the fix is proven from the upstream source and the unit tests, and the exe is attached to the CI run for the reporter |
+
+### 15.5 Change manifest (round 5)
+
+| File | Action | Scope | Reason | Test status |
+| --- | --- | --- | --- | --- |
+| `rdm-gui/src/tray.rs` | changed | UX / desktop integration | only a left click restores the window; the right button belongs to the OS menu | 7 unit tests |
+| `rdm-gui/src/theme/components.rs` | changed | UI / design system | token-driven icon+label geometry for labelled buttons | 4 unit tests |
+| `rdm-gui/src/theme/tokens.rs` | changed | UI / design system | `icon_in_button` and `window_padding` tokens | guard: every token field has a default |
+| `rdm-gui/src/theme/mod.rs` | changed | UI / design system | `window_frame` and its layout-pass test | 6 unit tests |
+| `rdm-gui/src/views/help_overlay.rs` | changed | UI | window padding via `theme::window_frame` | Windows compile + layout test above |
+| `rdm-gui/src/views/settings_view.rs` | changed | UI | window padding via `theme::window_frame` | Windows compile + layout test above |
+| `TEST_INVENTORY.md` | changed | docs | GUI suite 104 → 109 with the new contracts | — |
+
+No user-facing copy, no colour and no workflow file moved; the CLI and its tests are
+untouched.

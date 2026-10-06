@@ -136,6 +136,20 @@ pub fn sidebar_max_width(window_width: f32) -> f32 {
     (window_width * s.sidebar_max_ratio).clamp(s.sidebar_max_floor, s.sidebar_max_abs)
 }
 
+/// The frame a standalone window (Help, Settings) draws its content in.
+///
+/// Those two are deferred viewports that keep their own `CentralPanel`; they
+/// used `Frame::none()`, which insets nothing at all — headings and labels sat
+/// flush against the title bar and the window edges (round-5 report). The
+/// padding is [`Spacing::window_padding`], in one place, so a third window
+/// cannot get it wrong on its own.
+pub fn window_frame(palette: &Palette) -> egui::Frame {
+    let padding = Spacing::default().window_padding;
+    egui::Frame::none()
+        .fill(palette.surface)
+        .inner_margin(egui::Margin::symmetric(padding.x, padding.y))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,6 +261,36 @@ mod tests {
                  {expected:.2} pt — measured: {measured}"
             );
         }
+    }
+
+    #[test]
+    fn a_window_panel_insets_its_content_by_the_window_padding() {
+        // Round 5: Help and Settings drew their content in `Frame::none()`, so
+        // the first heading sat in the window's very corner. This runs the real
+        // layout pass and measures where the content actually lands.
+        let ctx = Context::default();
+        install(&ctx, true);
+        let palette = palette(true);
+        let padding = Spacing::default().window_padding;
+
+        let mut first = egui::Rect::NOTHING;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default()
+                .frame(window_frame(&palette))
+                .show(ctx, |ui| {
+                    first = ui.label("content").rect;
+                });
+        });
+
+        assert!(
+            (first.min.x - padding.x).abs() < 1.0 && (first.min.y - padding.y).abs() < 1.0,
+            "assertion: the first widget starts at ({:.2}, {:.2}), expected the window padding \
+             ({:.2}, {:.2})",
+            first.min.x,
+            first.min.y,
+            padding.x,
+            padding.y
+        );
     }
 
     #[test]

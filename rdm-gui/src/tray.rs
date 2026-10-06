@@ -5,6 +5,9 @@
 //! * the menu carries the frequent actions — *New download* (immediately
 //!   pre-filled from the clipboard), *Pause all*, *Resume all*, *Show rdm*,
 //!   the floating drop-target toggle and *Quit*;
+//! * a **left** click (or double click) on the icon restores the window, and a
+//!   **right** click opens the menu and nothing else — see
+//!   [`command_for_icon_event`] for why every button used to restore it;
 //! * with `close_to_tray` on, closing the window puts it in the tray instead of
 //!   quitting, and the transfer keeps running;
 //! * the icon comes from `icon::tray_icon()`, the same asset as the window and
@@ -50,7 +53,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
-use tray_icon::{TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::icon;
 
@@ -186,11 +189,8 @@ impl Tray {
             .name("rdm-tray-icon".to_string())
             .spawn(move || {
                 while let Ok(event) = TrayIconEvent::receiver().recv() {
-                    if matches!(
-                        event,
-                        TrayIconEvent::Click { .. } | TrayIconEvent::DoubleClick { .. }
-                    ) {
-                        deliver(TrayCommand::Show, &icon_inbox, &*icon_wake);
+                    if let Some(command) = command_for_icon_event(&event) {
+                        deliver(command, &icon_inbox, &*icon_wake);
                     }
                 }
             })
@@ -245,11 +245,8 @@ impl Tray {
         }
 
         while let Ok(event) = TrayIconEvent::receiver().try_recv() {
-            if matches!(
-                event,
-                TrayIconEvent::Click { .. } | TrayIconEvent::DoubleClick { .. }
-            ) {
-                commands.push(TrayCommand::Show);
+            if let Some(command) = command_for_icon_event(&event) {
+                commands.push(command);
             }
         }
 
@@ -347,6 +344,36 @@ fn arm_force_quit() {
     }
 }
 
+/// The command an icon event stands for — the one place that decides it.
+///
+/// Windows delivers a `Click` for **every** button and **both** press and
+/// release (`platform_impl/windows/mod.rs` of `tray-icon` 0.26: `WM_LBUTTONDOWN`
+/// `…UP`, `WM_RBUTTONDOWN` `…UP`, `WM_MBUTTONDOWN` `…UP`), and it shows the menu
+/// itself on the right-button release. Round 5's report — “right-clicking opens
+/// the menu, which closes at once while the window comes up” — was this module
+/// reading *all* of those events as *Show*: the relay restored the window while
+/// the menu was on screen, which took the foreground away from the menu's window
+/// and dismissed it. Restoring the window is now the left button's job alone,
+/// and only on the release, so one click is one command and the right button
+/// belongs to the OS and its menu.
+fn command_for_icon_event(event: &TrayIconEvent) -> Option<TrayCommand> {
+    match event {
+        TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+        }
+        | TrayIconEvent::DoubleClick {
+            button: MouseButton::Left,
+            ..
+        } => Some(TrayCommand::Show),
+        // Everything else is the OS's business: the menu on a right click, the
+        // middle button (unbound), and enter/move/leave, which are hover
+        // bookkeeping with no command behind them.
+        _ => None,
+    }
+}
+
 fn command_for(ids: &Ids, id: &MenuId) -> Option<TrayCommand> {
     if id == &ids.show {
         Some(TrayCommand::Show)
@@ -382,6 +409,7 @@ fn drop_target_label(shown: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tray_icon::TrayIconId;
 
     fn ids() -> Ids {
         Ids {
@@ -414,6 +442,82 @@ mod tests {
         assert_eq!(command_for(&ids, &ids.quit), Some(TrayCommand::Quit));
         // A separator or a future item must not be mistaken for a command.
         assert_eq!(command_for(&ids, &MenuId::new("something-else")), None);
+    }
+
+    fn click(button: MouseButton, button_state: MouseButtonState) -> TrayIconEvent {
+        TrayIconEvent::Click {
+            id: TrayIconId::new("rdm-test"),
+            position: tray_icon::dpi::PhysicalPosition::new(0.0, 0.0),
+            rect: tray_icon::Rect::default(),
+            button,
+            button_state,
+        }
+    }
+
+    fn double_click(button: MouseButton) -> TrayIconEvent {
+        TrayIconEvent::DoubleClick {
+            id: TrayIconId::new("rdm-test"),
+            position: tray_icon::dpi::PhysicalPosition::new(0.0, 0.0),
+            rect: tray_icon::Rect::default(),
+            button,
+        }
+    }
+
+    #[test]
+    fn a_right_click_opens_the_menu_and_nothing_else() {
+        // Round 5: the window came to the front on a right click and dismissed
+        // the menu that click had just opened. The relay used to deliver *Show*
+        // for any `Click`; the OS owns the right button, so none of these may
+        // turn into a command.
+        for event in [
+            click(MouseButton::Right, MouseButtonState::Down),
+            click(MouseButton::Right, MouseButtonState::Up),
+            double_click(MouseButton::Right),
+        ] {
+            assert_eq!(
+                command_for_icon_event(&event),
+                None,
+                "{event:?} must not restore the window — it dismisses the menu"
+            );
+        }
+    }
+
+    #[test]
+    fn only_a_finished_left_click_shows_the_window() {
+        // One click, one command: the press is not a command of its own, or a
+        // single click would be two.
+        assert_eq!(
+            command_for_icon_event(&click(MouseButton::Left, MouseButtonState::Up)),
+            Some(TrayCommand::Show)
+        );
+        assert_eq!(
+            command_for_icon_event(&click(MouseButton::Left, MouseButtonState::Down)),
+            None
+        );
+        assert_eq!(
+            command_for_icon_event(&double_click(MouseButton::Left)),
+            Some(TrayCommand::Show)
+        );
+        // The middle button is unbound, and hover events are not clicks.
+        assert_eq!(
+            command_for_icon_event(&click(MouseButton::Middle, MouseButtonState::Up)),
+            None
+        );
+        let rect = tray_icon::Rect::default();
+        for event in [
+            TrayIconEvent::Enter {
+                id: TrayIconId::new("rdm-test"),
+                position: tray_icon::dpi::PhysicalPosition::new(0.0, 0.0),
+                rect,
+            },
+            TrayIconEvent::Leave {
+                id: TrayIconId::new("rdm-test"),
+                position: tray_icon::dpi::PhysicalPosition::new(0.0, 0.0),
+                rect,
+            },
+        ] {
+            assert_eq!(command_for_icon_event(&event), None, "{event:?}");
+        }
     }
 
     #[test]

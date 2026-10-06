@@ -206,7 +206,10 @@ impl SettingsWindow {
                 theme::install(ctx, dark);
             }
             egui::CentralPanel::default()
-                .frame(egui::Frame::none().fill(palette.surface))
+                // The window padding token, shared with Help: the tab strip,
+                // the form and the footer keep their distance from the edges
+                // (round-5 report — the content used to be flush).
+                .frame(theme::window_frame(&palette))
                 .show(ctx, |ui| {
                     let Ok(mut shared) = shared.lock() else {
                         return;
