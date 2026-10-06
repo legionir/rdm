@@ -53,6 +53,8 @@ pub struct RdmGuiApp {
     quit_requested: bool,
     /// Ask the viewport to come back to the foreground (tray/import).
     reveal_requested: bool,
+    /// The Settings window (its own OS window since the follow-up round).
+    settings_window: crate::views::settings_view::SettingsWindow,
 }
 
 impl RdmGuiApp {
@@ -87,6 +89,7 @@ impl RdmGuiApp {
             drop_target_shown,
             quit_requested: false,
             reveal_requested: false,
+            settings_window: crate::views::settings_view::SettingsWindow::new(),
         };
         // A `-v` flag on the command line wins over the settings file.
         let level = match forced_level {
@@ -867,29 +870,18 @@ impl eframe::App for RdmGuiApp {
                 });
         }
 
-        if self.state.show_settings {
-            let settings_path = self.settings.path().display().to_string();
-            let db_path = self.backend.db_path().display().to_string();
-            egui::SidePanel::right("settings-sidebar")
-                .resizable(true)
-                .default_width(sizes.sidebar_default)
-                .min_width(sizes.sidebar_settings_min)
-                .max_width(sidebar_max)
-                .show(ctx, |ui| {
-                    actions.extend(crate::views::settings_view::show(
-                        ui,
-                        self.settings.settings_mut(),
-                        &settings_path,
-                        &db_path,
-                        &mut self.state,
-                    ));
-                });
-        }
-
         egui::CentralPanel::default().show(ctx, |ui| {
             actions.extend(crate::views::download_list::show(ui, &mut self.state));
         });
 
+        let db_path = self.backend.db_path().display().to_string();
+        actions.extend(crate::views::settings_view::SettingsWindow::show(
+            &mut self.settings_window,
+            ctx,
+            &mut self.settings,
+            &mut self.state,
+            &db_path,
+        ));
         actions.extend(crate::views::add_download::show(ctx, &mut self.state));
         actions.extend(crate::views::details_modal::show(ctx, &mut self.state));
         actions.extend(crate::views::help_overlay::show(ctx, &mut self.state));

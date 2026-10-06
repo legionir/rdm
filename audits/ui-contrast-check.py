@@ -130,6 +130,50 @@ def delimiter_balance(src: str) -> str | None:
     return None
 
 
+def strip_comments(src: str) -> str:
+    """Remove `//` line comments and `/* */` blocks, keeping string literals.
+
+    A tiny scanner, not a regex: a `//` inside `"http://"` is not a comment,
+    and an escaped quote does not end a string. Used by the font-coverage check
+    so that only renderable text is inspected.
+    """
+    out: list[str] = []
+    i, n = 0, len(src)
+    in_str = False
+    while i < n:
+        ch = src[i]
+        if in_str:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(src[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_str = False
+            i += 1
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+            i += 1
+            continue
+        if src.startswith("//", i):
+            i = src.find("\n", i)
+            if i == -1:
+                break
+            out.append("\n")  # the comment is dropped, the line break is kept
+            i += 1
+            continue
+        if src.startswith("/*", i):
+            end = src.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+            out.append(" ")
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".", help="repository root")
@@ -268,9 +312,21 @@ def main() -> int:
     sources = [
         gui / "app.rs", gui / "dropzone.rs", gui / "tray.rs", gui / "ux.rs",
     ] + [p for p in sorted((gui / "views").glob("*.rs")) if p.name != "mod.rs"]
+    # Guard the guard: the scanner must keep what is rendered and drop what is
+    # not, otherwise this check could be silently defanged.
+    assert risky_chars(strip_comments('let s = "→"; // → in a comment')) == ["→"], \
+        "the comment scanner is broken (a string-literal arrow must survive)"
+    assert risky_chars(strip_comments('// → only in a comment')) == [], \
+        "the comment scanner is broken (a comment-only arrow must be dropped)"
+    assert risky_chars(strip_comments('let u = "http://x"; let v = "→";')) == ["→"], \
+        "the comment scanner is broken (a // inside a URL must not start a comment)"
     bad = 0
     for path in sources:
-        hits = risky_chars(path.read_text())
+        # Only code and text that can be rendered is checked: `//` comments and
+        # doc comments are developer-facing, and ASCII/box diagrams in them are
+        # not drawn by egui. Strings — the things a user actually reads — are
+        # kept, including a trailing comment after one on the same line.
+        hits = risky_chars(strip_comments(path.read_text()))
         if hits:
             bad += 1
             failures += 1
