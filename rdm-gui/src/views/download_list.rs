@@ -220,7 +220,7 @@ fn header(ui: &mut Ui, palette: &Palette, cols: &Columns) {
     });
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        egui::Stroke::new(1.0, palette.border_subtle),
+        egui::Stroke::new(1.0_f32, palette.border_subtle),
     );
 }
 

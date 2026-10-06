@@ -80,16 +80,6 @@ impl Tab {
     }
 }
 
-/// Values the window body needs that live outside the draft: paths shown as
-/// hints, and the metadata-directory text field (which is applied separately,
-/// through `Apply data directory`).
-pub struct Env<'a> {
-    pub settings_path: &'a str,
-    pub db_path: &'a str,
-    pub data_dir_input: &'a mut String,
-    pub dirty: bool,
-}
-
 /// The state the settings window owns while it is on screen.
 struct Shared {
     /// The edited copy of the settings.
@@ -109,6 +99,10 @@ struct Shared {
     /// The active tab. It lives here, not in the struct, because the viewport
     /// closure is an `Fn`: it may read captured values, not mutate them.
     tab: Tab,
+    /// The store has been copied into the draft at least once. Until then
+    /// nothing here may be written back into the app's view-model: the block is
+    /// still empty, and an empty metadata field would wipe the app's.
+    seeded: bool,
 }
 
 impl Shared {
@@ -123,6 +117,7 @@ impl Shared {
             close_requested: false,
             seed: true,
             tab: Tab::Downloads,
+            seeded: false,
         }
     }
 }
@@ -180,6 +175,7 @@ impl SettingsWindow {
         if let Ok(mut shared) = self.shared.lock() {
             if shared.seed {
                 shared.seed = false;
+                shared.seeded = true;
                 shared.draft = store.settings().clone();
                 shared.dirty = state.settings_dirty;
             }
@@ -229,21 +225,11 @@ impl SettingsWindow {
                             let Shared {
                                 draft,
                                 data_dir_input,
-                                settings_path,
-                                db_path,
-                                dirty,
                                 actions,
                                 tab,
                                 ..
                             } = &mut *shared;
-                            let mut env = Env {
-                                settings_path: settings_path.as_str(),
-                                db_path: db_path.as_str(),
-                                data_dir_input,
-                                dirty: *dirty,
-                            };
-                            actions.extend(tab_body(ui, *tab, draft, &mut env));
-                            *dirty = env.dirty;
+                            actions.extend(tab_body(ui, *tab, draft, data_dir_input));
                         });
                     if shared.draft != before {
                         shared.dirty = true;
@@ -286,9 +272,13 @@ impl SettingsWindow {
             *store.settings_mut() = shared.draft.clone();
             shared.dirty = true;
         }
-        state.data_dir_input = shared.data_dir_input.clone();
-        state.settings_dirty = shared.dirty;
-        self.tab = shared.tab;
+        if shared.seeded {
+            // Only write back once the window has really been filled; before
+            // that the fields hold nothing.
+            state.data_dir_input = shared.data_dir_input.clone();
+            state.settings_dirty = shared.dirty;
+            self.tab = shared.tab;
+        }
 
         let actions = std::mem::take(&mut shared.actions);
         // Reload means “throw my edits away”: re-copy the store on the next
@@ -312,20 +302,32 @@ fn tab_strip(ui: &mut Ui, tab: &mut Tab, spacing: &Spacing) {
 }
 
 /// The body of the active tab.
-fn tab_body(ui: &mut Ui, tab: Tab, settings: &mut AppSettings, env: &mut Env<'_>) -> Vec<UiAction> {
+///
+/// `data_dir_input` is the metadata-directory text field: it is applied
+/// separately, through `Apply data directory`, so it is the one value that is
+/// not part of the draft.
+fn tab_body(
+    ui: &mut Ui,
+    tab: Tab,
+    settings: &mut AppSettings,
+    data_dir_input: &mut String,
+) -> Vec<UiAction> {
     match tab {
-        Tab::Downloads => downloads_tab(ui, settings, env),
-        Tab::Application => application_tab(ui, settings, env),
-        Tab::Desktop => desktop_tab(ui, settings, env),
+        Tab::Downloads => downloads_tab(ui, settings, data_dir_input),
+        Tab::Application => application_tab(ui, settings, data_dir_input),
+        Tab::Desktop => desktop_tab(ui, settings, data_dir_input),
     }
 }
 
 /// `Downloads`: output directory and the per-download defaults.
-fn downloads_tab(ui: &mut Ui, settings: &mut AppSettings, _env: &mut Env<'_>) -> Vec<UiAction> {
+fn downloads_tab(
+    ui: &mut Ui,
+    settings: &mut AppSettings,
+    _data_dir_input: &mut String,
+) -> Vec<UiAction> {
     let palette = theme::palette_of(ui);
     let sizes = Sizes::default();
     let spacing = Spacing::default();
-    let mut actions = Vec::new();
 
     components::section_title(ui, "Defaults for new downloads");
     ui.add_space(spacing.md);
@@ -389,11 +391,15 @@ fn downloads_tab(ui: &mut Ui, settings: &mut AppSettings, _env: &mut Env<'_>) ->
     components::section_title(ui, "Where new downloads are checked");
     ui.add_space(spacing.md);
     ui.label("Checksum / user-agent defaults are per download — see the New download form.");
-    actions
+    Vec::new()
 }
 
 /// `Application`: process-wide behaviour.
-fn application_tab(ui: &mut Ui, settings: &mut AppSettings, env: &mut Env<'_>) -> Vec<UiAction> {
+fn application_tab(
+    ui: &mut Ui,
+    settings: &mut AppSettings,
+    data_dir_input: &mut String,
+) -> Vec<UiAction> {
     let palette = theme::palette_of(ui);
     let sizes = Sizes::default();
     let spacing = Spacing::default();
@@ -407,7 +413,7 @@ fn application_tab(ui: &mut Ui, settings: &mut AppSettings, env: &mut Env<'_>) -
         let avail = ui.available_width();
         components::text_edit(
             ui,
-            env.data_dir_input,
+            data_dir_input,
             (avail - sizes.picker_reserve).max(sizes.picker_min),
             ".rdm",
         );
@@ -418,13 +424,13 @@ fn application_tab(ui: &mut Ui, settings: &mut AppSettings, env: &mut Env<'_>) -
         )
         .clicked()
         {
-            let start = util::existing_dir(env.data_dir_input);
+            let start = util::existing_dir(data_dir_input);
             if let Some(dir) = util::pick_folder(start.as_deref(), "Metadata directory") {
-                *env.data_dir_input = dir.display().to_string();
+                *data_dir_input = dir.display().to_string();
             }
         }
     });
-    if let Some(hint) = ux::doubled_separator_hint(env.data_dir_input) {
+    if let Some(hint) = ux::doubled_separator_hint(data_dir_input) {
         components::hint(ui, &palette, hint);
     }
     if ui
@@ -470,9 +476,12 @@ fn application_tab(ui: &mut Ui, settings: &mut AppSettings, env: &mut Env<'_>) -
 }
 
 /// `Desktop integration`: the three switches the tray also toggles.
-fn desktop_tab(ui: &mut Ui, settings: &mut AppSettings, _env: &mut Env<'_>) -> Vec<UiAction> {
+fn desktop_tab(
+    ui: &mut Ui,
+    settings: &mut AppSettings,
+    _data_dir_input: &mut String,
+) -> Vec<UiAction> {
     let spacing = Spacing::default();
-    let actions = Vec::new();
 
     components::section_title(ui, "Desktop integration");
     ui.add_space(spacing.md);
@@ -503,7 +512,7 @@ fn desktop_tab(ui: &mut Ui, settings: &mut AppSettings, _env: &mut Env<'_>) -> V
         "The tray menu toggles these too, so they stay reachable while the main \
          window is hidden.",
     );
-    actions
+    Vec::new()
 }
 
 /// The window footer: Save / Reload, the unsaved-changes banner and the paths.
@@ -560,8 +569,10 @@ mod tests {
         let window = SettingsWindow::new();
         {
             let mut shared = window.shared.lock().unwrap();
+            shared.data_dir_input = draft.data_dir.clone();
             shared.draft = draft;
             shared.seed = false;
+            shared.seeded = true;
         }
         window
     }
@@ -627,7 +638,7 @@ mod tests {
     fn a_clean_draft_leaves_the_store_untouched() {
         let (_dir, mut store) = temp_store();
         store.settings_mut().connections = 7;
-        let window = window_with(store.settings().clone());
+        let mut window = window_with(store.settings().clone());
         let mut state = GuiState::new(
             store.settings().to_request(),
             store.path().display().to_string(),
@@ -638,6 +649,24 @@ mod tests {
         assert_eq!(store.settings().connections, 7);
         assert!(!state.settings_dirty, "an untouched window stays clean");
         assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn a_window_that_never_opened_leaves_the_view_model_alone() {
+        let (_dir, mut store) = temp_store();
+        let mut window = SettingsWindow::new();
+        let mut state = GuiState::new(
+            store.settings().to_request(),
+            store.path().display().to_string(),
+        );
+        let before = state.data_dir_input.clone();
+
+        window.collect(&mut store, &mut state);
+
+        assert_eq!(
+            state.data_dir_input, before,
+            "an unseeded window must not wipe the metadata field"
+        );
     }
 
     #[test]

@@ -116,7 +116,7 @@ mod tests {
         // window can always be closed from the keyboard as well as with the ✕.
         let shortcuts = ux::SHORTCUTS;
         assert!(
-            shortcuts.iter().any(|(key, what)| key.contains("Esc")),
+            shortcuts.iter().any(|(key, _what)| key.contains("Esc")),
             "Esc is no longer documented"
         );
         assert!(

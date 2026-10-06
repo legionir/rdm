@@ -94,13 +94,13 @@ fn visuals(p: &Palette) -> egui::Visuals {
     v.extreme_bg_color = p.surface_input;
     v.faint_bg_color = p.surface_alt;
     v.selection.bg_fill = p.surface_selected;
-    v.selection.stroke = egui::Stroke::new(1.0, p.text_primary);
+    v.selection.stroke = egui::Stroke::new(1.0_f32, p.text_primary);
     v.hyperlink_color = p.accent;
     v.warn_fg_color = p.warning;
     v.error_fg_color = p.danger;
 
-    let hairline = egui::Stroke::new(1.0, p.border_subtle);
-    let text = egui::Stroke::new(1.0, p.text_primary);
+    let hairline = egui::Stroke::new(1.0_f32, p.border_subtle);
+    let text = egui::Stroke::new(1.0_f32, p.text_primary);
 
     v.widgets.noninteractive.bg_fill = p.surface;
     v.widgets.noninteractive.weak_bg_fill = p.surface;
@@ -201,9 +201,14 @@ mod tests {
                         .rect
                         .height(),
                 ));
+                // `ComboBox` is not a `Widget` in egui 0.29 — it is shown, and
+                // the height to compare is its button's.
                 heights.push((
                     "combo box",
-                    ui.add(egui::ComboBox::from_id_salt("combo").selected_text("all states"))
+                    egui::ComboBox::from_id_salt("combo")
+                        .selected_text("all states")
+                        .show_ui(ui, |_| {})
+                        .response
                         .rect
                         .height(),
                 ));
