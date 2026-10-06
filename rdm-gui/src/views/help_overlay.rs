@@ -1,4 +1,4 @@
-//! In-app help (`F1` / the ⓘ button): what the states mean, the keyboard map
+//! In-app help (`F1` / the info button): what the states mean, the keyboard map
 //! and the words rdm uses — the same content the tooltips carry, in one place,
 //! so help is not hover-only (UX `RISK-UX-003`).
 //!

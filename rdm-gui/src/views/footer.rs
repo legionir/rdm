@@ -80,7 +80,7 @@ pub fn status_bar(ui: &mut Ui, state: &mut GuiState) {
 }
 
 /// The expandable box above the status bar. Rendered only while one of the
-/// two footer buttons has been pressed; the ✕ on the right closes it.
+/// two footer buttons has been pressed; the close button on the right closes it.
 pub fn panel(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
     let mut actions = Vec::new();
     let Some(panel) = state.footer_panel else {
@@ -99,15 +99,11 @@ pub fn panel(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
             }
         }
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .button("✕")
-                .on_hover_text("Close")
-                .clicked()
-            {
+            if components::icon_button(ui, theme::Icon::Close, "Close this panel").clicked() {
                 state.footer_panel = None;
             }
             if panel == FooterPanel::AppLog {
-                if ui.small_button("Copy").clicked() {
+                if ui.button("Copy").clicked() {
                     let text = state
                         .log
                         .iter()
@@ -118,7 +114,7 @@ pub fn panel(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
                         .join("\n");
                     actions.push(UiAction::CopyToClipboard(text));
                 }
-                if ui.small_button("Clear").clicked() {
+                if ui.button("Clear").clicked() {
                     actions.push(UiAction::ClearLog);
                 }
                 egui::ComboBox::from_id_salt("log-pane-filter")

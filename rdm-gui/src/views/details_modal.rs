@@ -49,7 +49,7 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     }
                 }
                 ui.separator();
-                ui.label(components::state_text(&palette, record.state))
+                components::state_heading(ui, &palette, record.state)
                     .on_hover_text(ux::legend_for(record.state).hover_text());
                 components::hint(ui, &palette, format!("· {}", record.filename));
             });

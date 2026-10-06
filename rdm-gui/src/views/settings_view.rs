@@ -5,7 +5,7 @@ use egui::{Align, Layout, RichText, Ui};
 
 use crate::settings::AppSettings;
 use crate::state::{GuiState, UiAction};
-use crate::theme::{self, components, Sizes, Spacing};
+use crate::theme::{self, components, Icon, Sizes, Spacing};
 use crate::util;
 use crate::ux;
 
@@ -21,7 +21,6 @@ pub fn show(
     let palette = theme::palette_of(ui);
     let sizes = Sizes::default();
     let spacing = Spacing::default();
-    let edit_margin = egui::Margin::symmetric(spacing.sm, spacing.xs);
 
     // Children must not report a bigger size than the panel — TextEdit with
     // infinite desired width and long path labels would otherwise stretch a
@@ -32,11 +31,7 @@ pub fn show(
     ui.horizontal(|ui| {
         ui.heading("Settings");
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui
-                .button("✕")
-                .on_hover_text("Hide the settings sidebar")
-                .clicked()
-            {
+            if components::icon_button(ui, Icon::Close, "Hide the settings sidebar").clicked() {
                 state.show_settings = false;
             }
         });
@@ -54,17 +49,17 @@ pub fn show(
             ui.label("Download directory");
             ui.horizontal(|ui| {
                 let avail = ui.available_width();
-                ui.add(
-                    egui::TextEdit::singleline(&mut settings.download_dir)
-                        .hint_text("current directory")
-                        .margin(edit_margin)
-                        .desired_width((avail - sizes.picker_reserve).max(sizes.picker_min)),
+                components::text_edit(
+                    ui,
+                    &mut settings.download_dir,
+                    (avail - sizes.picker_reserve).max(sizes.picker_min),
+                    "current directory",
                 );
                 if components::icon_button(
                     ui,
-                    "📂",
+                    Icon::Folder,
                     "Choose a folder in the system file explorer",
-                ) {
+                ).clicked() {
                     let start = util::existing_dir(&settings.download_dir);
                     if let Some(dir) = util::pick_folder(start.as_deref(), "Download directory") {
                         settings.download_dir = dir.display().to_string();
@@ -85,20 +80,15 @@ pub fn show(
 
             ui.add_space(spacing.md);
             ui.label("Minimum chunk size");
-            ui.add(
-                egui::TextEdit::singleline(&mut settings.chunk_size)
-                    .hint_text("1MiB")
-                    .margin(edit_margin)
-                    .desired_width(ui.available_width()),
-            );
+            components::text_edit(ui, &mut settings.chunk_size, ui.available_width(), "1MiB");
 
             ui.add_space(spacing.xs);
             ui.label("Speed limit");
-            ui.add(
-                egui::TextEdit::singleline(&mut settings.max_speed)
-                    .hint_text("unlimited, e.g. 5MB/s")
-                    .margin(edit_margin)
-                    .desired_width(ui.available_width()),
+            components::text_edit(
+                ui,
+                &mut settings.max_speed,
+                ui.available_width(),
+                "unlimited, e.g. 5MB/s",
             );
 
             ui.add_space(spacing.xs);
@@ -107,12 +97,7 @@ pub fn show(
 
             ui.add_space(spacing.xs);
             ui.label("User agent");
-            ui.add(
-                egui::TextEdit::singleline(&mut settings.user_agent)
-                    .hint_text("rdm/0.1.0")
-                    .margin(edit_margin)
-                    .desired_width(ui.available_width()),
-            );
+            components::text_edit(ui, &mut settings.user_agent, ui.available_width(), "rdm/0.1.0");
 
             ui.add_space(spacing.xl);
             ui.separator();
@@ -122,17 +107,17 @@ pub fn show(
             ui.label("Metadata directory (--data-dir)");
             ui.horizontal(|ui| {
                 let avail = ui.available_width();
-                ui.add(
-                    egui::TextEdit::singleline(&mut state.data_dir_input)
-                        .hint_text(".rdm")
-                        .margin(edit_margin)
-                        .desired_width((avail - sizes.picker_reserve).max(sizes.picker_min)),
+                components::text_edit(
+                    ui,
+                    &mut state.data_dir_input,
+                    (avail - sizes.picker_reserve).max(sizes.picker_min),
+                    ".rdm",
                 );
                 if components::icon_button(
                     ui,
-                    "📂",
+                    Icon::Folder,
                     "Choose a folder in the system file explorer",
-                ) {
+                ).clicked() {
                     let start = util::existing_dir(&state.data_dir_input);
                     if let Some(dir) = util::pick_folder(start.as_deref(), "Metadata directory") {
                         state.data_dir_input = dir.display().to_string();
@@ -211,10 +196,10 @@ pub fn show(
             ui.add_space(spacing.xl);
             ui.separator();
             ui.horizontal(|ui| {
-                if ui.button("💾 Save").clicked() {
+                if ui.button("Save").clicked() {
                     actions.push(UiAction::SaveSettings);
                 }
-                if ui.button("↺ Reload").clicked() {
+                if ui.button("Reload").clicked() {
                     actions.push(UiAction::ReloadSettings);
                 }
             });

@@ -1,8 +1,8 @@
 //! Application root: polls the metadata database, renders the panels and
 //! turns [`UiAction`]s into `rdm` library calls.
 //!
-//! Layout (top to bottom): toolbar → optional Queue/Settings sidebars →
-//! download list → optional Events/App-log box → status bar. Details live in
+//! Layout (top to bottom): toolbar -> optional Queue/Settings sidebars ->
+//! download list -> optional Events/App-log box -> status bar. Details live in
 //! a modal opened by double-clicking a row.
 
 use std::path::{Path, PathBuf};
@@ -210,7 +210,7 @@ impl RdmGuiApp {
                 let mut form = self.settings.settings().to_request();
                 form.url = self.state.form.url.clone();
                 // “Copy a link, press New”: the clipboard fills the field when
-                // the switch is on (Settings → Application).
+                // the switch is on (Settings, Application).
                 let mut prefilled = false;
                 if self.settings.settings().clipboard_prefill {
                     if let Some(link) = clipboard::url() {

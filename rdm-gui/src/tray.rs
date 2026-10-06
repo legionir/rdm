@@ -65,7 +65,7 @@ struct Ids {
 /// The live tray icon. Dropping it removes the icon, so the app owns it.
 pub struct Tray {
     _icon: TrayIcon,
-    /// The one item whose text reflects a setting (a ✓ suffix).
+    /// The one item whose text reflects a setting ("on"/"off").
     drop_target: MenuItem,
     ids: Ids,
     drop_target_shown: Cell<bool>,
@@ -174,12 +174,16 @@ impl Tray {
     }
 }
 
-/// The drop-target entry carries a ✓ when it is on — one item, no second
-/// toggle, and the same words as the Settings switch.
+/// The drop-target entry says its state in words — one item, no second toggle,
+/// and the same words as the Settings switch.
+///
+/// It used to end in a check-mark glyph, which a native menu renders with the
+/// system font: on a font without `U+2713` that is an empty box — the same
+/// defect class as the drawn icons in `theme::icons`.
 fn drop_target_label(shown: bool) -> &'static str {
     if shown {
-        "Floating drop target ✓"
+        "Floating drop target: on"
     } else {
-        "Floating drop target"
+        "Floating drop target: off"
     }
 }

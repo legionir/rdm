@@ -34,7 +34,7 @@ pub struct Columns {
 impl Columns {
     /// Fit the columns into `width`.
     ///
-    /// Drop order for the optional columns is ADDED → SPEED → ETA; then the
+    /// Drop order for the optional columns is ADDED, SPEED, ETA; then the
     /// progress bar gets narrow, and finally the fixed columns are scaled down
     /// proportionally (never below a quarter of their design width) so the row
     /// never grows wider than the panel. FILE keeps at least `file_min`.
@@ -384,9 +384,8 @@ fn row(
 
     // ACTIONS
     cell(&mut row_ui, cols.actions, "actions", |ui| {
-        // Icon buttons: a bit tighter than the app-wide paddings so four of
-        // them fit into the column.
-        ui.spacing_mut().button_padding = spacing.icon_button;
+        // Square icon buttons (the shared control height) with a tight gap, so
+        // up to six of them fit into the actions column.
         ui.spacing_mut().item_spacing.x = spacing.icon_gap;
         let running = record.state.active();
         // Resume only where the backend accepts it: `Backend::resume` rejects
@@ -399,31 +398,32 @@ fn row(
             );
 
         if running {
-            if components::icon_button(ui, "⏸", ux::pause_tooltip()) {
+            if components::icon_button(ui, crate::theme::Icon::Pause, ux::pause_tooltip()).clicked() {
                 actions.push(UiAction::Pause(record.id));
             }
-            if components::icon_button(ui, "⏹", ux::cancel_tooltip()) {
+            if components::icon_button(ui, crate::theme::Icon::Stop, ux::cancel_tooltip()).clicked() {
                 actions.push(UiAction::Cancel(record.id));
             }
-        } else if resumable && components::icon_button(ui, "▶", ux::resume_tooltip()) {
+        } else if resumable && components::icon_button(ui, crate::theme::Icon::Play, ux::resume_tooltip()).clicked() {
             actions.push(UiAction::Resume(record.id));
         }
         if !running
-            && components::icon_button(ui, "⟲", ux::restart_tooltip(record.state))
-        {
+            && components::icon_button(ui, crate::theme::Icon::Restart, ux::restart_tooltip(record.state)).clicked() {
             actions.push(UiAction::AskRestart(record.id));
         }
-        if components::icon_button(ui, "📂", ux::open_folder_tooltip()) {
+        if components::icon_button(ui, crate::theme::Icon::Folder, ux::open_folder_tooltip()).clicked() {
             actions.push(UiAction::OpenOutputFolder(record.id));
         }
         if running {
             // Disabled with an explanation instead of failing in the backend.
             let disabled = ui.add_enabled(
                 false,
-                egui::Button::new(RichText::new("🗑").small()),
+                egui::Button::new("").min_size(egui::Vec2::splat(
+                    crate::theme::Spacing::default().icon_button_side,
+                )),
             );
             disabled.on_disabled_hover_text(ux::remove_tooltip(true));
-        } else if components::icon_button(ui, "🗑", ux::remove_tooltip(false)) {
+        } else if components::icon_button(ui, crate::theme::Icon::Trash, ux::remove_tooltip(false)).clicked() {
             actions.push(UiAction::AskRemove(record.id));
         }
     });

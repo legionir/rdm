@@ -187,7 +187,7 @@ pub fn resume_all_outcome(continued: usize, needs_restart: usize) -> String {
     };
     if needs_restart > 0 {
         text.push_str(&format!(
-            " {needs_restart} failed download(s) cannot continue — use ⟲ Restart on them."
+            " {needs_restart} failed download(s) cannot continue — use Restart on them."
         ));
     }
     text
@@ -197,7 +197,7 @@ pub fn resume_all_outcome(continued: usize, needs_restart: usize) -> String {
 /// in the README and in hovering.
 pub const SHORTCUTS: [(&str, &str); 8] = [
     ("Enter", "open the details of the selected download"),
-    ("↑ / ↓", "move the selection"),
+    ("Up / Down", "move the selection"),
     ("Esc", "close the top-most window, dialog or panel"),
     ("Ctrl+F", "focus the search box"),
     ("F5", "refresh the list"),
@@ -215,7 +215,7 @@ pub const DESKTOP_HELP: [&str; 6] = [
     "New download fills the URL from the clipboard when it holds a link, and selects it: Enter starts the transfer.",
     "The floating drop target is a small always-on-top box above the taskbar clock — drop a link from a browser on it and the New download form opens with that link.",
     "A link or file dropped on the window itself takes the same path; anything that is not a link is reported in the status bar instead of being ignored.",
-    "Settings → Desktop integration holds those three switches; the tray menu toggles the floating drop target too.",
+    "Settings, Desktop integration holds those three switches; the tray menu toggles the floating drop target too.",
 ];
 
 pub fn help_sections() -> Vec<(&'static str, Vec<String>)> {
@@ -353,24 +353,24 @@ pub fn legend_tooltip() -> String {
 
 // --------------------------------------------------------------- row actions
 
-/// Tooltip for the ⏸ button (only offered while a download is running).
+/// Tooltip for the pause button (only offered while a download is running).
 pub fn pause_tooltip() -> &'static str {
     "Pause — stop the transfer and keep the progress"
 }
 
-/// Tooltip for the ⏹ button (only offered while a download is running).
+/// Tooltip for the stop button (only offered while a download is running).
 pub fn cancel_tooltip() -> &'static str {
     "Cancel — stop the transfer; the partial data is kept"
 }
 
-/// Tooltip for the ▶ button. Never offered for `Failed` or `Completed`: a
+/// Tooltip for the resume button. Never offered for `Failed` or `Completed`: a
 /// failed download cannot be continued (the engine only restarts it), so the
-/// row offers ⟲ Restart instead of a button that would only produce an error.
+/// row offers Restart instead of a button that would only produce an error.
 pub fn resume_tooltip() -> &'static str {
     "Resume — continue this download where it stopped"
 }
 
-/// Tooltip for the ⟲ button; the wording depends on what would be lost.
+/// Tooltip for the restart button; the wording depends on what would be lost.
 pub fn restart_tooltip(state: DownloadState) -> &'static str {
     match state {
         DownloadState::Failed => {

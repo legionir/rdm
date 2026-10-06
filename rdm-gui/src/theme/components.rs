@@ -6,10 +6,11 @@
 //! a hint, a metadata line, a status chip and a row background look the same
 //! in the table, the queue sidebar, the modals and the settings panel.
 
-use egui::{Color32, Response, RichText, Ui};
+use egui::{Color32, FontId, Response, RichText, Sense, TextStyle, Ui, Vec2};
 use rdm::models::DownloadState;
 
-use crate::theme::tokens::{state_glyph, Palette};
+use crate::theme::icons::{self, Icon};
+use crate::theme::tokens::{Palette, Spacing};
 
 /// Severity of an inline message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,28 +74,83 @@ pub fn section_title(ui: &mut Ui, text: &str) -> Response {
     ui.add(egui::Label::new(RichText::new(text).strong()))
 }
 
-/// Status chip: glyph + state, coloured by the semantic palette and backed by
-/// `surface_chip` so the label stays legible on every row surface.
+/// Status chip: state icon + state name, coloured by the semantic palette and
+/// backed by `surface_chip` so the label stays legible on every row surface.
 ///
-/// The glyph means colour is never the only signal (WCAG 1.4.1).
+/// The icon means colour is never the only signal (WCAG 1.4.1). It is *painted*
+/// (see [`crate::theme::icons`]), not a font glyph — the earlier glyph version
+/// rendered as an empty box on systems whose fonts lack those codepoints.
 pub fn status_chip(ui: &mut Ui, palette: &Palette, state: DownloadState) -> Response {
-    let text = format!("{} {}", state_glyph(state), state);
-    ui.add(
-        egui::Label::new(
-            RichText::new(text)
-                .small()
-                .color(palette.state_color(state))
-                .background_color(palette.surface_chip),
-        )
-        .truncate(),
-    )
+    let spacing = Spacing::default();
+    let font = small_font(ui);
+    let colour = palette.state_color(state);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(state.to_string(), font, colour);
+    let icon = spacing.state_icon;
+    let pad = Vec2::new(spacing.sm, spacing.xxs);
+    let size = Vec2::new(
+        icon + spacing.xs + galley.size().x + pad.x * 2.0,
+        (icon + pad.y * 2.0).max(galley.size().y + pad.y * 2.0),
+    );
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(rect, 3.0, palette.surface_chip);
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + pad.x + icon / 2.0, rect.center().y),
+        Vec2::splat(icon),
+    );
+    icons::paint(painter, Icon::state(state), icon_rect, colour);
+    painter.galley(
+        egui::pos2(icon_rect.right() + spacing.xs, rect.center().y - galley.size().y / 2.0),
+        galley,
+        colour,
+    );
+    response
 }
 
-/// The same glyph+label without the chip background, for modal headers.
+/// The state name alone (no glyph) for places that build their own text.
 pub fn state_text(palette: &Palette, state: DownloadState) -> RichText {
-    RichText::new(format!("{} {}", state_glyph(state), state))
+    RichText::new(state.to_string())
         .strong()
         .color(palette.state_color(state))
+}
+
+/// State icon + name in one row: modal headers wear the same mark as the chips.
+pub fn state_heading(ui: &mut Ui, palette: &Palette, state: DownloadState) -> Response {
+    let spacing = Spacing::default();
+    let icon = spacing.state_icon * 1.3;
+    let colour = palette.state_color(state);
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::splat(icon), Sense::hover());
+        icons::paint(ui.painter(), Icon::state(state), rect, colour);
+        ui.label(state_text(palette, state));
+    })
+    .response
+}
+
+/// The small text style, with a fallback for a context that never got a theme.
+fn small_font(ui: &Ui) -> FontId {
+    ui.style()
+        .text_styles
+        .get(&TextStyle::Small)
+        .cloned()
+        .unwrap_or_else(|| FontId::proportional(11.0))
+}
+
+/// A single-line text input with the standard geometry: same height as buttons,
+/// combo boxes and the folder pickers, one place to change it.
+pub fn text_edit(ui: &mut Ui, value: &mut String, width: f32, hint: &str) -> Response {
+    let spacing = Spacing::default();
+    // The margin only pads the text; the *height* is the shared control height,
+    // because `Spacing::interact` sets `interact_size.y` (see `theme::install`).
+    // Adding more vertical margin here is what made inputs taller than buttons.
+    ui.add(
+        egui::TextEdit::singleline(value)
+            .hint_text(hint)
+            .desired_width(width)
+            .margin(egui::Margin::symmetric(spacing.sm, spacing.xs)),
+    )
 }
 
 /// Inline message strip: form validation errors, warnings, informational text.
@@ -112,8 +168,48 @@ pub fn banner(ui: &mut Ui, palette: &Palette, kind: Level, text: &str) -> Respon
 
 /// Compact icon button used inside table rows, with a mandatory tooltip (the
 /// accessible name for a glyph-only control).
-pub fn icon_button(ui: &mut Ui, glyph: &str, tooltip: &str) -> bool {
-    ui.small_button(glyph).on_hover_text(tooltip).clicked()
+pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str) -> Response {
+    let spacing = Spacing::default();
+    let response = ui.add_sized(
+        Vec2::splat(spacing.icon_button_side),
+        egui::Button::new(""),
+    );
+    paint_icon(ui, &response, icon, spacing.icon_button_side);
+    response.on_hover_text(tooltip)
+}
+
+/// A button that carries an icon and a label, both inside the control height.
+///
+/// egui lays the label out itself, so the icon is painted into a small leading
+/// gap reserved with spaces — that keeps one code path for the frame, the
+/// hover state and the height, which is what makes the row uniform.
+pub fn icon_text_button(
+    ui: &mut Ui,
+    icon: Icon,
+    label: &str,
+    selected: bool,
+    tooltip: &str,
+) -> Response {
+    let spacing = Spacing::default();
+    let response = ui.add(egui::Button::new(format!("   {label}")).selected(selected));
+    let icon_rect = egui::Rect::from_min_size(
+        response.rect.left_top() + Vec2::new(spacing.sm, spacing.xs),
+        Vec2::splat(spacing.control_height - spacing.xs * 2.0),
+    );
+    let colour = ui.visuals().text_color();
+    icons::paint(ui.painter(), icon, icon_rect, colour);
+    response.on_hover_text(tooltip)
+}
+
+/// Paint `icon` inside a widget's rect, in the colour the widget's text uses.
+fn paint_icon(ui: &Ui, response: &Response, icon: Icon, side: f32) {
+    let inset = (side * 0.22).max(4.0);
+    let colour = if response.hovered() {
+        ui.visuals().strong_text_color()
+    } else {
+        ui.visuals().text_color()
+    };
+    icons::paint(ui.painter(), icon, response.rect.shrink(inset), colour);
 }
 
 /// Primary action ("New download", "Start"); returns the response so callers

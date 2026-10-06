@@ -256,14 +256,20 @@ pub struct Spacing {
     pub xxl: f32,
     /// Global `item_spacing`.
     pub item: Vec2,
+    /// Height every interactive control shares: buttons, icon buttons, text
+    /// inputs, combo boxes and the folder pickers. One number, one row height —
+    /// the mix of `small_button`, default padding and per-widget margins is what
+    /// made the toolbar look ragged.
+    pub control_height: f32,
+    /// Side of a square icon button (equals [`Spacing::control_height`]).
+    pub icon_button_side: f32,
+    /// State icon inside a status chip.
+    pub state_icon: f32,
     /// Global `button_padding`.
-    pub button: Vec2,
     /// Global `interact_size`.
     pub interact: Vec2,
     /// Table row height (the column padding lives in [`Table`]).
     pub row_height: f32,
-    /// Icon buttons inside a table row (tighter than the global padding).
-    pub icon_button: Vec2,
     pub icon_gap: f32,
     /// Activity spinner next to the "running here" counter.
     pub spinner: f32,
@@ -280,10 +286,14 @@ impl Default for Spacing {
             xl: 12.0,
             xxl: 24.0,
             item: Vec2::new(8.0, 8.0),
-            button: Vec2::new(12.0, 6.0),
-            interact: Vec2::new(40.0, 22.0),
+            control_height: 24.0,
+            icon_button_side: 24.0,
+            state_icon: 12.0,
+            // Padding is chosen so text + padding never exceeds the control
+            // height; the height itself comes from `interact_size`.
+            button: Vec2::new(10.0, 4.0),
+            interact: Vec2::new(44.0, 24.0),
             row_height: 42.0,
-            icon_button: Vec2::new(7.0, 4.0),
             icon_gap: 5.0,
             spinner: 14.0,
         }
@@ -499,21 +509,6 @@ impl Breakpoints {
     }
 }
 
-/// Glyph shown next to a state, so colour is never the only carrier of
-/// meaning (WCAG 1.4.1 Use of Colour).
-pub fn state_glyph(state: DownloadState) -> &'static str {
-    match state {
-        DownloadState::Completed => "✔",
-        DownloadState::Running => "▶",
-        DownloadState::Merging => "⛃",
-        DownloadState::Queued => "…",
-        DownloadState::Paused => "⏸",
-        DownloadState::Interrupted => "⚠",
-        DownloadState::Failed => "✖",
-        DownloadState::Cancelled => "⃠",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -531,10 +526,8 @@ mod tests {
                     palette.dark_mode
                 );
             }
-            assert!(
-                !state_glyph(state).trim().is_empty(),
-                "state {state} has no glyph"
-            );
+            // The chip's mark is a painted icon now (`theme::icons::Icon::state`),
+            // so there is no font glyph left to check for emptiness here.
         }
     }
 

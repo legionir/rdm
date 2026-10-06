@@ -18,9 +18,7 @@ pub mod tokens;
 
 pub use components::Level;
 pub use icons::Icon;
-pub use tokens::{
-    state_glyph, Breakpoints, LayoutMode, Palette, Radii, Sizes, Spacing, Table, Tokens, Typography,
-};
+pub use tokens::{Breakpoints, LayoutMode, Palette, Radii, Sizes, Spacing, Table, Tokens, Typography};
 
 use egui::{Context, FontFamily, FontId, TextStyle};
 use std::collections::BTreeMap;
@@ -166,6 +164,65 @@ mod tests {
         "Color32::RED",
         "Color32::WHITE",
     ];
+
+
+    /// The sizes the user complained about, measured for real.
+    ///
+    /// egui lays widgets out without a window, so this test runs the *actual*
+    /// layout pass: a button, the square icon button, a text input, a combo box
+    /// and the labelled button must all come out at [`Spacing::control_height`].
+    /// That is the guarantee behind “standardise the heights” — a regression here
+    /// is one a reviewer would otherwise only see on a desktop.
+    #[test]
+    fn every_control_in_a_row_is_control_height_tall() {
+        let ctx = Context::default();
+        install(&ctx, true);
+
+        let expected = Spacing::default().control_height;
+        // The token and the style the widgets actually read must agree.
+        assert!(
+            (ctx.style().spacing.interact_size.y - expected).abs() < 0.01,
+            "interact_size.y is {}, expected the control height {expected}",
+            ctx.style().spacing.interact_size.y
+        );
+
+        let mut text = String::new();
+        let mut heights: Vec<(&str, f32)> = Vec::new();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                heights.push(("button", ui.button("Clear").rect.height()));
+                heights.push((
+                    "icon button",
+                    components::icon_button(ui, Icon::Close, "clear").rect.height(),
+                ));
+                heights.push((
+                    "text input",
+                    components::text_edit(ui, &mut text, 120.0, "hint")
+                        .rect
+                        .height(),
+                ));
+                heights.push((
+                    "combo box",
+                    ui.add(egui::ComboBox::from_id_salt("combo").selected_text("all states"))
+                        .rect
+                        .height(),
+                ));
+                heights.push((
+                    "labelled button",
+                    components::icon_text_button(ui, Icon::Plus, "New download", false, "t")
+                        .rect
+                        .height(),
+                ));
+            });
+        });
+
+        for (name, height) in heights {
+            assert!(
+                (height - expected).abs() < 1.0,
+                "{name} is {height:.1} pt, expected the shared control height {expected:.1} pt"
+            );
+        }
+    }
 
     #[test]
     fn views_do_not_hardcode_colours() {

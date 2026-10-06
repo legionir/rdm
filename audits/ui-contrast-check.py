@@ -250,6 +250,36 @@ def main() -> int:
     if failures == 0:
         say(f"  [ok] {len(ui_files)} UI files: no colour literals, all use `theme::`")
 
+    # 6 — glyph coverage ----------------------------------------------------
+    # On a real Windows desktop, `✕`, `ⓘ`, `↑`, `↓`, `☰`, `⚙`, `⏸`, `▶`, `⏹`,
+    # `⟲`, `✔`, `⚠`, `✖`, `⬇` all rendered as empty boxes: egui's bundled fonts
+    # cover emoji (U+1F300+) and Latin-1, not Miscellaneous Symbols / Dingbats /
+    # Arrows / Geometric Shapes. UI sources must therefore use painted icons
+    # (`theme::icons`) instead of those codepoints. Reported by the user from
+    # screenshots; this check keeps the class from coming back.
+    say("")
+    say("== 6. Font coverage of user-facing sources ==")
+    RISKY = [(0x2190, 0x2BFF), (0xFE0F, 0xFE0F)]
+    def risky_chars(text: str) -> list[str]:
+        return sorted({
+            ch for ch in text
+            if any(lo <= ord(ch) <= hi for lo, hi in RISKY)
+        })
+    sources = [
+        gui / "app.rs", gui / "dropzone.rs", gui / "tray.rs", gui / "ux.rs",
+    ] + [p for p in sorted((gui / "views").glob("*.rs")) if p.name != "mod.rs"]
+    bad = 0
+    for path in sources:
+        hits = risky_chars(path.read_text())
+        if hits:
+            bad += 1
+            failures += 1
+            say(f"  FAIL {path.relative_to(root)}: risky codepoints {hits} "
+                f"(use theme::icons instead)")
+    if bad == 0:
+        say(f"  [ok] {len(sources)} user-facing files: no codepoints outside the "
+            f"fonts egui bundles")
+
     # 5 — delimiter sanity -------------------------------------------------
     say("")
     say("== 5. Static sanity of the changed Rust files ==")

@@ -19,7 +19,6 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
     let palette = theme::palette_ctx(ctx);
     let sizes = Sizes::default();
     let spacing = Spacing::default();
-    let edit_margin = egui::Margin::symmetric(spacing.sm, spacing.xs);
     // Set when the window was opened from the tray/drop target or pre-filled
     // from the clipboard: put the caret in the URL field with the link
     // selected, so typing replaces it and Enter starts the download.
@@ -39,11 +38,13 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                 .min_col_width(sizes.form_label_width)
                 .show(ui, |ui| {
                     ui.label("URL").on_hover_text(ux::URL_FIELD_HINT);
+                    // Same height and padding as every other control; the id is
+                    // what the clipboard pre-fill focuses and selects.
                     let url = ui.add(
                         egui::TextEdit::singleline(&mut state.form.url)
                             .id(url_field)
                             .hint_text("https://example.com/file.zip")
-                            .margin(edit_margin)
+                            .margin(egui::Margin::symmetric(spacing.sm, spacing.xs))
                             .desired_width(sizes.edit_wide),
                     );
                     if focus_url {
@@ -64,17 +65,17 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     ui.label("Output")
                         .on_hover_text("File path or directory. Empty = current directory.");
                     ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut state.form.output)
-                                .hint_text("directory or full file path")
-                                .margin(edit_margin)
-                                .desired_width(sizes.edit_medium),
+                        components::text_edit(
+                            ui,
+                            &mut state.form.output,
+                            sizes.edit_medium,
+                            "directory or full file path",
                         );
-                        if ui
-                            .button("📂")
-                            .on_hover_text("Choose a folder in the system file explorer")
-                            .clicked()
-                        {
+                        if components::icon_button(
+                            ui,
+                            crate::theme::Icon::Folder,
+                            "Choose a folder in the system file explorer",
+                        ).clicked() {
                             let start = util::existing_dir(&state.form.output);
                             if let Some(dir) = util::pick_folder(start.as_deref(), "Output folder") {
                                 state.form.output = dir.display().to_string();
@@ -93,21 +94,21 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     ui.end_row();
 
                     ui.label("Min chunk size").on_hover_text("--chunk-size, e.g. 1MiB");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut state.form.chunk_size)
-                            .hint_text("1MiB")
-                            .margin(edit_margin)
-                            .desired_width(sizes.edit_narrow),
+                    components::text_edit(
+                        ui,
+                        &mut state.form.chunk_size,
+                        sizes.edit_narrow,
+                        "1MiB",
                     );
                     ui.end_row();
 
                     ui.label("Speed limit")
                         .on_hover_text("--max-speed, e.g. 5MB/s. Empty = unlimited.");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut state.form.max_speed)
-                            .hint_text("unlimited")
-                            .margin(edit_margin)
-                            .desired_width(sizes.edit_narrow),
+                    components::text_edit(
+                        ui,
+                        &mut state.form.max_speed,
+                        sizes.edit_narrow,
+                        "unlimited",
                     );
                     ui.end_row();
 
@@ -117,21 +118,16 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
 
                     ui.label("Checksum")
                         .on_hover_text("--checksum sha256:<64 hex chars>");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut state.form.checksum)
-                            .hint_text("sha256:…")
-                            .margin(edit_margin)
-                            .desired_width(sizes.edit_wide),
+                    components::text_edit(
+                        ui,
+                        &mut state.form.checksum,
+                        sizes.edit_wide,
+                        "sha256:…",
                     );
                     ui.end_row();
 
                     ui.label("User agent").on_hover_text("--user-agent");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut state.form.user_agent)
-                            .hint_text("rdm/0.1.0")
-                            .margin(edit_margin)
-                            .desired_width(sizes.edit_wide),
-                    );
+                    components::text_edit(ui, &mut state.form.user_agent, sizes.edit_wide, "rdm/0.1.0");
                     ui.end_row();
 
                     ui.label("Existing record");

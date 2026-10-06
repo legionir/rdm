@@ -16,16 +16,12 @@ pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
         ui.heading("Queue");
         components::hint(ui, &palette, format!("{} queued", state.queue.len()));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui
-                .button("✕")
-                .on_hover_text("Hide the queue sidebar")
-                .clicked()
-            {
+            if components::icon_button(ui, theme::Icon::Close, "Hide the queue sidebar").clicked() {
                 state.show_queue = false;
             }
             if !state.queue.is_empty()
                 && ui
-                    .small_button(format!("{}", BulkAction::DropQueue))
+                    .button(BulkAction::DropQueue.to_string())
                     .on_hover_text(ux::drop_queue_tooltip())
                     .clicked()
             {
@@ -81,8 +77,11 @@ fn job_row(
     ui.horizontal(|ui| {
         components::meta(ui, palette, format!("{}.", position + 1));
         ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-            if components::icon_button(ui, "✕", "Drop from the queue — nothing has been downloaded yet")
-            {
+            if components::icon_button(
+                ui,
+                theme::Icon::Close,
+                "Drop from the queue — nothing has been downloaded yet",
+            ).clicked() {
                 actions.push(UiAction::DropQueued(seq));
             }
             ui.vertical(|ui| {
