@@ -352,3 +352,55 @@ the wrong rect again.
 
 Nothing outside the UX scope was touched: `.github/workflows/build.yml` is unchanged
 (`UX-ESC-003` still stands for the annotation steps) and no engine, storage or API code moved.
+
+## 14. Round 4 (2026-10-07) — the tray freeze, second attempt: what the first fix got wrong
+
+### 14.1 The report
+
+The product owner re-reported the identical symptom after `df2a4eb` (green CI): “when the app goes
+to the tray none of its menu items work; it is as if it has hung completely, and it has to be ended
+from the Task Manager”. PH-8 had fixed the *hide* call but left the freeze in place.
+
+### 14.2 What was wrong with the first fix (honest accounting)
+
+`windows::hide_main_window` kept `WS_VISIBLE` (correct) **and then called `SW_MINIMIZE`** “to give
+the keyboard back”. A minimized window has nothing on screen to paint, so `WM_PAINT` stops —
+exactly the state the function was written to avoid. The menu still opened, because the OS draws
+it on the app’s message pump; the commands were read inside `App::update`, which never ran again.
+Round 3’s *cause* was understood correctly and the *remedy* smuggled the same trap back in. CI
+cannot see this: it compiles and tests, it does not sit in a notification area. The missing gate
+was always PH-8.11 (desktop smoke test), and it is still open.
+
+There was a second, independent weakness: the relay threads only **queued** the commands. With no
+frames, a queue is read by nobody — including the command that would have restored the frames.
+
+### 14.3 The fix
+
+| Layer | Behaviour |
+| --- | --- |
+| hide | Alpha 0, click-through, tool-window, `WS_EX_NOACTIVATE`, z-order to the bottom — **never minimized, `WS_VISIBLE` never cleared**. The window stays “on screen” to Windows, so it keeps painting; if it ever stops, nothing below depends on it |
+| tray relay | *Show* and *New download* restore the window through the OS from the relay thread itself; when `frames::is_stale()` (2 s) says the UI stopped delivering frames, *every* command gets that rescue; the state-dependent commands (*Pause all*, *Resume all*, the drop-target toggle) are still applied in the app |
+| Quit | Restores the window **and arms a deadline** (`FORCE_QUIT_MS` = 8 s > the 5 s graceful shutdown): if the app has not exited by then, the process ends itself and logs why. The tray’s *Quit* is always true to its name, so “end it from the Task Manager” is never required again |
+| handle | Captured twice (start-up context, first frame) and, failing both, searched for among this process’s own unowned top-level windows by title (`RDM` vs `rdm — …`), validated with `IsWindow` before every use |
+| diagnosis | Every line also appended to `rdm-gui.log` in the data directory, one line per open; the relays log each command and whether they armed; the hide decision logs its result |
+
+### 14.4 Verification, and the honest gap
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Windows compile + 104 GUI tests | PASS | run **37535678990** (`668166d`), also the `pull_request` twin 37535686161 |
+| Guards against the whole trap class | PASS | no `SW_MINIMIZE` / `Minimized(true)` / `Visible(false)` in the tray path (comments stripped), hiding never minimizes, only the main title wins the window search, the Quit deadline outlives the graceful shutdown |
+| The tray on a real desktop, with the log file returned as evidence | **NOT RUN — NOT_APPLICABLE in this environment** | `UX-ESC-005`; artifact `rdm-gui-windows-x86_64.exe` (5,819,368 bytes) from run 37535678990 |
+
+### 14.5 Change manifest (round 4)
+
+| File | Action | Scope | Reason | Requirement | Test status | Evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| `rdm-gui/src/windows.rs` | changed | UX / desktop integration | no minimize, no blanking; window search; validated handle; style restore on refusal | R7 | 4 unit tests | run 37535678990 |
+| `rdm-gui/src/tray.rs` | changed | UX / desktop integration | relays act (reveal) instead of only queueing; Quit deadline; logging of every command and of whether the relays armed | R7 | 5 unit tests | run 37535678990 |
+| `rdm-gui/src/app.rs` | changed | UX / desktop integration | handle capture from the frame loop, hidden heartbeat, diagnosis lines | R7 | 3 unit tests | run 37535678990 |
+| `rdm-gui/src/frames.rs` | changed | UX / desktop integration | liveness window 1 s → 2 s with the slower hidden heartbeat | R7 | 2 unit tests | run 37535678990 |
+| `rdm-gui/src/logging.rs` | changed | UX (diagnostics) | `rdm-gui.log` in the data directory, every captured line | R7 | 4 unit tests | run 37535678990 |
+| `rdm-gui/src/main.rs` | changed | UX (diagnostics) | pass the data directory to the logger | R7 | Windows compile | run 37535678990 |
+
+Nothing outside the UX scope moved; the workflow file is untouched (`UX-ESC-003`).

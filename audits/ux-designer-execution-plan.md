@@ -148,6 +148,28 @@ accepts a dropped link while the app sits in the tray.
 | 8.10 | CI round 2 — the failing height test now reports **which** control and by how much (the annotation filter needed the message to start with `assertion:`); it named the text input at 16 pt, which is `TextEdit` shrinking its reply to the inner rect (egui 0.29 `text_edit/builder.rs:416`) — the control itself is 24 pt | 🟢 runs 37521816137 / 37521825816 → **37522424155 / 37522433273** green (`8b03d25`) |
 | 8.11 | Windows-desktop smoke test of the round trip (close → tray → Show, a drop on the target while the window is hidden, the heights on a real desktop) | 🔴 open — `UX-ESC-005` (QA) |
 
+## PH-9 — Round-3 re-report: the tray freeze was NOT fixed, and why `[🟡]`
+
+Trigger: the product owner re-reported on 2026-10-07, with the same symptom and a new detail —
+“when the app goes to the tray none of its menu items work; it is as if it has hung completely,
+and it has to be ended from the Task Manager”. `df2a4eb` (PH-8) had shipped as green CI, so a
+green build is not evidence here: the report is about a Windows desktop, which this environment
+does not have. The honest reading is that PH-8’s fix addressed the *hide* technique but left the
+freeze in place, and PH-8.11 (the desktop smoke test) would have caught it.
+
+| Step | Work | Status |
+| --- | --- | --- |
+| 9.1 | Re-open PH-8 on the evidence: the fix kept `WS_VISIBLE` but called `SW_MINIMIZE` in the same function (“give the keyboard back”) — and a **minimized window has nothing to paint**, so `WM_PAINT` stops, `App::update` stops, and the tray commands that were only *queued* wait forever. The menu still opens because the OS draws it on the app’s message pump: the app looks alive and does nothing, which is exactly the report | 🟢 root cause |
+| 9.2 | `windows::hide_main_window` no longer minimizes and no longer clears `WS_VISIBLE`: alpha 0, click-through, tool-window, `WS_EX_NOACTIVATE`, z-order to the bottom. The window stays “on screen” to Windows, so paints keep coming — and nothing below depends on them | 🟢 |
+| 9.3 | The relay threads now **act** instead of queueing: *Show* and *New download* restore the window through the OS themselves; the state-dependent commands stay in the app and are rescued with a reveal when `frames::is_stale()` | 🟢 |
+| 9.4 | *Quit* always quits: the relay restores the window and arms a deadline (`FORCE_QUIT_MS` = 8 s, longer than the 5 s graceful shutdown) after which the process ends itself, logging why — “end it from the Task Manager” is no longer the only way out of a wedged app | 🟢 |
+| 9.5 | The window handle is captured twice (start-up context, then the first frame) and, failing both, **searched for** among this process’s own unowned top-level windows, ranked by title (`RDM` = 2, `rdm — …` = 0), validated with `IsWindow` before every use | 🟢 |
+| 9.6 | Diagnostics, because the report has to be answerable from a frozen desktop: `rdm-gui.log` in the data directory receives every line (the window that shows the app log is the window a freeze takes away), the tray relays log every command and whether it was armed, and the hide decision logs its result | 🟢 |
+| 9.7 | The hidden-window heartbeat drops to 1 s and `frames::STALE_MS` rises 1 s → 2 s, so a healthy hidden app can never be mistaken for a dead one (which would pop the window up on every click) | 🟢 |
+| 9.8 | Guards: no `SW_MINIMIZE` / `Minimized(true)` / `Visible(false)` may appear in the tray path (comments stripped before searching), hiding never minimizes, only the main title wins the window search, the Quit deadline outlives the graceful shutdown, and the log file receives every captured line | 🟢 |
+| 9.9 | CI — three annotation-driven rounds: `SWP_NOZORDER` missing from an import list, `Option<Arc<PathBuf>>` returned where `Option<&Path>` was promised, and two failing tests (the file write was in the wrong function; the `SW_MINIMIZE` guard matched its own prose) | 🟢 runs 37534564654 / 37535011455 → **37535678990 / 37535686161** green (`668166d`), 104 tests |
+| 9.10 | Windows-desktop smoke test with the new binary, **including the log file checkout** (close → tray → each menu item → Quit; then read `rdm-gui.log` for the tray lines) | 🔴 open — `UX-ESC-005` (QA / product owner) |
+
 ## Discovered work (added with a reason, never silently)
 
 | # | Discovery | Reason it was added | Status |
@@ -174,6 +196,12 @@ accepts a dropped link while the app sits in the tray.
 | D-20 | `deliver(cmd, &inbox, &menu_wake)` does not coerce `&Arc<Wake>` to `&Wake` in argument position; the relay threads now pass `&*menu_wake` | Annotation from the same run; the test’s `&*wake` form was already correct | 🟢 8.9 |
 | D-21 | egui 0.29’s `TextEdit` deliberately shrinks its `Response::rect` to the **inner** text rect (`text_edit/builder.rs:416`, with a TODO to return the outer rect), so the height test was measuring 16 pt while the control on screen was 24 pt | The failing assertion in run 37521816137 named it with numbers once the message was readable; documented on `components::text_edit` so no caller aligns to the wrong rect | 🟢 8.2 / 8.10 |
 | D-22 | The Windows job surfaces a failing test as a workflow annotation filtered by `^assertion`/`^left:`/`^right:`, so the *numbers* in a panic message were invisible; the assertion now starts with `assertion:` and lists every measurement | Two runs were spent guessing which control was off; the diagnostic change is what turned the third run into a one-line answer | 🟢 8.10 |
+| D-23 | **A fix can be green in CI and still not fix the report.** PH-8 kept the window visible to Windows but minimized it in the same function; CI compiles and tests, it does not sit in a tray | The product owner re-reported the identical freeze after `df2a4eb`; the desktop smoke test (PH-8.11/9.10) is the gate that was missing, and it stays open | 🟢 recorded |
+| D-24 | Queueing a command is not the same as applying it: with no frames, the queue is read by nobody — including the command that would restore the frames | Re-read of `tray.rs` against the report: the relay threads *received* the clicks and *wrote* them where only a dead thread would read them | 🟢 9.3 |
+| D-25 | The tray’s own *Quit* could not save the user either, for the same reason, so “end it from the Task Manager” was the only exit | The report names that workaround explicitly; a tray app must never require it | 🟢 9.4 |
+| D-26 | The App-log tab is not a diagnostic channel for this class of defect — the freeze is what makes that window unreachable | The reason `rdm-gui.log` now exists, one line per open, flushed as written | 🟢 9.6 |
+| D-27 | `GuiState::push_log` never reached the tracing buffer, so the app’s own status lines (including “window hidden…”) were absent from any log file; the tray decisions now log through `tracing` as well | Found while wiring the log file: a diagnostic file that misses the decisive line is not a diagnostic file | 🟢 9.6 |
+| D-28 | The `SW_MINIMIZE` guard failed on its own prose (the module *documents* the trap) — the same self-match class as the glyph audit; comments are stripped before searching | Annotation from run 37535011455 | 🟢 9.8/9.9 |
 
 ## Verification results (final)
 
@@ -189,6 +217,8 @@ accepts a dropped link while the app sits in the tray.
 | Tray / floating target / real clipboard / exe icon on a Windows desktop | **NOT RUN — NOT_APPLICABLE in this environment** | `UX-ESC-005` (QA smoke-test checklist) |
 | Control heights (button · icon button · text input · combo box · labelled button = 24 pt) | PASS | CI run **37522424155** (`build-gui-windows` → `Test GUI crate`); the red run 37521816137 carries the message that named the text input at 16 pt |
 | Tray-freeze fix compiles and every GUI test passes on Windows | PASS | CI runs **37522424155** / **37522433273** (`8b03d25`): `test-windows` ✓, `build-gui-windows` ✓, artifact `rdm-gui-windows-x86_64.exe` (5,808,400 bytes) |
+| Tray freeze fix (round 4) compiles and all 104 GUI tests pass on Windows | PASS | CI runs **37535678990** / **37535686161** (`668166d`): `test-windows` ✓, `build-gui-windows` ✓, artifact `rdm-gui-windows-x86_64.exe` (5,819,368 bytes) |
+| The tray works with no frames at all (Show / New download / Quit from the relay threads) | **NOT RUN — NOT_APPLICABLE in this environment** | `UX-ESC-005`: the desktop test, with `rdm-gui.log` as the evidence to return |
 | Tray round trip (close → tray → Show / New download, drop on the target while hidden) on a real desktop | **NOT RUN — NOT_APPLICABLE in this environment** | `UX-ESC-005` (QA smoke test; the artifact above is the hand-off) |
 | User testing | **MISSING — NOT_APPLICABLE in this environment** | `UX-ESC-001` |
 

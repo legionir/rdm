@@ -187,5 +187,42 @@
     "fix": "layered hide that keeps WS_VISIBLE (windows::hide_main_window / reveal_main_window), tray commands received on two blocking relay threads and applied from a queue, an OS-level reveal for window commands or when frames::is_stale(), and a transparent clear colour for the transparent viewports",
     "height_contract": "button / icon button / text input / combo box / labelled button = 24.00 pt (Spacing::control_height); `TextEdit` shrinks its reply to the inner rect, so the test measures the rect the control occupies (egui 0.29 text_edit/builder.rs:416)",
     "not_run": "tray round trip and a real drag-and-drop on a Windows desktop -> UX-ESC-005 (QA); the CI artefact is the hand-off"
+  },
+  "round_4_2026_10_07": {
+    "trigger": "product owner re-reported the identical freeze after df2a4eb (green CI): “no tray menu item works, the app looks hung, it has to be ended from the Task Manager”",
+    "why_the_first_fix_failed": "`windows::hide_main_window` kept WS_VISIBLE but called SW_MINIMIZE to give the keyboard back; a minimized window has nothing on screen to paint, so WM_PAINT and App::update stop — and the relay threads only *queued* the commands that App::update would have applied. The menu still opened because the OS draws it on the app's message pump.",
+    "rounds": [
+      {
+        "sha": "df2a4eb",
+        "runs": [37534564654, 37534555585],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "`SWP_NOZORDER` missing from reveal_main_window’s import list (E0425); `LogControl::log_file` returned Option<Arc<PathBuf>> where Option<&Path> was promised (E0308)"
+      },
+      {
+        "sha": "40939e0",
+        "runs": [37535011455, 37535016088],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "two failing tests: the file append lived in the fmt writer instead of LogBuffer::push (a line pushed by the app never reached the file), and the SW_MINIMIZE guard matched the module’s own prose"
+      }
+    ],
+    "green": {
+      "sha": "668166d",
+      "runs": [37535678990, 37535686161],
+      "events": {"37535678990": "push", "37535686161": "pull_request"},
+      "conclusion": "success",
+      "jobs": {"test-windows": "success", "build-gui-windows": "success"},
+      "artifact": {"name": "rdm-gui-windows-x86_64.exe", "size_in_bytes": 5819368},
+      "tests": 104
+    },
+    "fix": [
+      "hide_main_window: alpha 0 + click-through + tool-window + WS_EX_NOACTIVATE + bottom of the z-order; never SW_MINIMIZE, never clear WS_VISIBLE; the extended style is restored if SetLayeredWindowAttributes refuses",
+      "the tray relays act: Show/New download reveal through the OS from the relay thread; state-dependent commands are rescued with a reveal when frames::is_stale(); Quit reveals and arms FORCE_QUIT_MS = 8000 (the graceful shutdown is capped at 5000), after which the process ends itself and logs why",
+      "the window handle is captured twice (CreationContext, then the first frame) and otherwise searched for among this process's own unowned top-level windows by title rank (RDM = 2, rdm — … = 0), validated with IsWindow before every use",
+      "hidden-window heartbeat 1 s (was 250 ms) and frames::STALE_MS 2 s (was 1 s), so a healthy hidden app is never rescued as if it were dead",
+      "every captured line is appended to rdm-gui.log in the data directory, one line per open; the relays log each command and whether they armed; the hide decision logs its result"
+    ],
+    "not_run": "the tray round trip on a real Windows desktop; rdm-gui.log from that session is the evidence to return -> UX-ESC-005"
   }
 }

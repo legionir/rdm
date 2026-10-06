@@ -22,10 +22,11 @@
 - src/cli/commands.rs: 7 new (parse_checksum ×3, opts_parse ×3, connections_range)
 - tests/cli_real.rs: 2 new (help/version, bad-url graceful)
 
-## GUI tests (rdm-gui/src/) — 99 tests
+## GUI tests (rdm-gui/src/) — 104 tests
 - app.rs: 3 (transparent clear colour for the transparent viewports; the tray hide path
-  never blanks the window — source guard against `ViewportCommand::Visible(false)`;
-  the repaint heartbeat is short enough to feel instant)
+  never blanks **or minimizes** the window — source guard against `ViewportCommand::Visible(false)`
+  and `ViewportCommand::Minimized(true)`; the repaint heartbeat is short enough to feel instant,
+  and slow enough in the tray to sit well inside the liveness window)
 - backend.rs: 10
 - logging.rs: 2
 - settings.rs: 9 (4 + 5 for the path work: five save/load cycles of `C:\download\rdm`,
@@ -37,13 +38,18 @@
 - clipboard.rs: 2 (what counts as a link / what does not)
 - dropzone.rs: 3 (target geometry, one-shot ✕/activation flags, uri-list from dropped paths)
 - icon.rs: 2 (the embedded 64×64 RGBA buffer is complete and not transparent; window icon size)
-- windows.rs: 2 (the work-area anchor is either absent or on screen; an unknown window handle
-  is a refusal, not a guess — the tray must not pretend to restore a window it cannot)
+- windows.rs: 4 (the work-area anchor is either absent or on screen; an unknown window handle
+  is a refusal, not a guess; **hiding never minimizes** — no `SW_MINIMIZE` anywhere, comments
+  stripped; only the main window’s title wins the fallback search, never `rdm — Settings`/`Help`/
+  the drop target)
 - frames.rs: 2 (a fresh frame is never stale, an old one is; the liveness window is
-  comfortably longer than the 250 ms heartbeat the app asks for)
-- tray.rs: 4 (every menu id maps to its command and nothing else does; only `Show` /
+  comfortably longer than both heartbeats — 250 ms on screen, 1 s in the tray)
+- tray.rs: 5 (every menu id maps to its command and nothing else does; only `Show` /
   `New download` need the window — the list is a contract; the inbox keeps order and is
-  handed over exactly once; the drop-target item says its state in words, no ✓ glyph)
+  handed over exactly once; the Quit deadline outlives the graceful shutdown and stays
+  inside what a user will wait; the drop-target item says its state in words, no ✓ glyph)
+- logging.rs: 4 (level splitting, buffer order/drain, every line also lands in the log file,
+  a missing data directory disables the file without failing)
 - theme/tokens.rs: 5 (state/chunk/log coverage, state distinguishability, zebra tint, breakpoints)
 - theme/contrast.rs: 5 (WCAG maths, contract in both themes, worst-pair margin, focus ring, name resolution)
 - theme/icons.rs: 3 (drawn glyph geometry: closed shapes, stroke inside the rect, state mapping)
@@ -101,7 +107,8 @@ over CLI help, the GUI strings and the README.
   then the staged artifact `rdm-gui-windows-x86_64.exe`
 
 Last verified counts, Windows runner: `test-windows` ✓ and `build-gui-windows` ✓ on run
-**37522424155** (`8b03d25`, 2026-10-06) — the GUI job executed the 99 cases listed above
-(0 failed) and uploaded the binary (5,808,400 bytes). Runs 37520509055/37520515850,
-37521061557/37521068081 and 37521816137/37521825816 are the annotation-driven rounds that
-led there; their causes are recorded in `audits/evidence/ux-feature-pack-ci-runs.json`.
+**37535678990** (`668166d`, 2026-10-07) — the GUI job executed the 104 cases listed above
+(0 failed) and uploaded the binary (5,819,368 bytes). The rounds that led there — the round-3
+heights work (37522424155, `8b03d25`, 99 cases) and the round-4 tray fix (37534564654 →
+37535011455 → 37535678990) — are recorded with their causes in
+`audits/evidence/ux-feature-pack-ci-runs.json`.
