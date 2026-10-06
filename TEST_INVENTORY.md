@@ -123,8 +123,11 @@ review.
   then the staged artifact `rdm-gui-windows-x86_64.exe`
 
 Last verified counts, Windows runner: `test-windows` ✓ and `build-gui-windows` ✓ on run
-**37535678990** (`668166d`, 2026-10-07) — the GUI job executed the 104 cases listed above
-(0 failed) and uploaded the binary (5,819,368 bytes). The rounds that led there — the round-3
-heights work (37522424155, `8b03d25`, 99 cases) and the round-4 tray fix (37534564654 →
-37535011455 → 37535678990) — are recorded with their causes in
+**37546378552** (`ce38af6`, 2026-10-07, plus the `pull_request` twin 37546382954) — the GUI job
+built the crate, ran the 109 cases listed above (0 failed: the *Surface test failures* step
+stayed skipped) and uploaded the binary (5,821,067 bytes); the `release` job skipped itself,
+as it only runs for `v*` tags. Before that, 104 cases were green on **37535678990** (`668166d`).
+The rounds that led there — the round-3 heights work (37522424155, `8b03d25`, 99 cases), the
+round-4 tray fix (37534564654 → 37535011455 → 37535678990) and the round-5 tray/padding/gap
+fix (37546378552) — are recorded with their causes in
 `audits/evidence/ux-feature-pack-ci-runs.json`.

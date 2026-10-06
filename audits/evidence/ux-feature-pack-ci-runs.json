@@ -224,5 +224,37 @@
       "every captured line is appended to rdm-gui.log in the data directory, one line per open; the relays log each command and whether they armed; the hide decision logs its result"
     ],
     "not_run": "the tray round trip on a real Windows desktop; rdm-gui.log from that session is the evidence to return -> UX-ESC-005"
+  },
+
+  "round_5_2026_10_07": {
+    "trigger": "the product owner reported three defects from the running build: (1) with the window in the tray a right click opened the menu, which closed at once while the window came to the front, (2) Help and Settings had no padding around their content, (3) the icon of a button with a label was glued to the label",
+    "causes": {
+      "tray": "`tray-icon` 0.26 sends a `TrayIconEvent::Click` for every button and both edges on Windows, and shows the menu itself on the right-button release; both readers of that channel matched `Click { .. }` with no button filter, so the right click became `TrayCommand::Show` -> `reveal_main_window()` -> `SetForegroundWindow`, which took the foreground from the popup and dismissed the menu that click had just opened",
+      "padding": "`views/help_overlay.rs` and `views/settings_view.rs` drew their content in `Frame::none()`, which insets nothing at all",
+      "icon_gap": "`components::icon_text_button` reserved the icon slot with three literal spaces and painted the icon at a fixed inset, so how much room the label left depended on the font; on the shipped font the label's ink began inside the icon rectangle"
+    },
+    "fixes": [
+      "`tray::command_for_icon_event`: `Show` only for `MouseButton::Left` with `MouseButtonState::Up` (or the left double click); right, middle, enter/move/leave map to nothing; both readers of the channel go through the one function",
+      "`theme::window_frame` and `Spacing::window_padding` (12 x 10), used by both windows; the help window's `add_space(xs)` substitute is gone",
+      "`components::icon_text_layout` and `Spacing::icon_in_button` (16 pt): the control is sized from the measured label and the tokens, and the icon and the label are painted into `Button::new(\"\").min_size(layout.size)`, whose label is reported through `WidgetInfo::labeled`"
+    ],
+    "rounds": [
+      {
+        "sha": "ce38af6",
+        "runs": [
+          37546378552,
+          37546382954
+        ],
+        "conclusion": "success",
+        "cause": null,
+        "detail": "first run of the fix is green: `test-windows` and `build-gui-windows` both pass (build, 109 GUI tests, stage, upload: `rdm-gui-windows-x86_64.exe`, 5,821,067 bytes); the compiler-error and test-failure annotation steps stayed skipped, i.e. nothing to annotate; `release` skipped itself because the push is not a tag"
+      }
+    ],
+    "local_verification_before_the_push": [
+      "tree-sitter (Rust grammar) over all 29 `rdm-gui` sources: no ERROR or missing node, with the checker validated against a deliberately broken file",
+      "`audits/ui-contrast-check.py` PASS: token discipline in 9 UI files, every declared token field has a default, delimiters balanced in 29 Rust files",
+      "`audits/ux-terminology-check.py` PASS: no user-facing copy moved in this round"
+    ],
+    "not_run": "the tray round trip on a real Windows desktop (same escape as round 4: the fix is proven from the upstream event stream and by the unit tests; the run's binary is the artifact to try) -> UX-ESC-005"
   }
 }

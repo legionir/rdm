@@ -413,7 +413,10 @@ upstream code) so it cannot come back as “looked fine on this machine”.
 
 ### 15.1 The reports
 
-| # | Report (as received) | Visible effect |
+The reports arrived in Persian, from the running build; the wording below is the
+translation kept for this record.
+
+| # | Report | Visible effect |
 | --- | --- | --- |
 | R5-1 | “With the window in the tray, a **right** click opens the menu and it closes at once, and the window comes to the front. A right click should only show the menu.” | The tray menu was unusable: the window it summoned dismissed the menu that summoned it |
 | R5-2 | “Help and Settings have no padding around them — the content is glued to the edges.” | Headings, labels and separators sat against the title bar and the window frame |
@@ -465,7 +468,7 @@ why `theme::icons` exists and glyphs are banned).
 | The upstream event stream the tray fix depends on | Read, not guessed | `tray-icon` 0.26.0 `src/platform_impl/windows/mod.rs` (`tray_proc`) and `src/lib.rs` (`MouseButton`, `MouseButtonState`, `TrayIconEvent`); the menu is shown by the library, on the right-button release |
 | The whole GUI crate still parses | PASS | `tree-sitter` (Rust grammar) over all 29 `rdm-gui` sources: zero `ERROR`/missing nodes (the checker was itself validated against a deliberately broken file) |
 | Design guards and audit scripts | PASS | `audits/ui-contrast-check.py`: token discipline (9 UI files, no colour literals), “every declared token field has a default”, delimiters balanced in 29 files; `audits/ux-terminology-check.py`: PASS (no new user-facing copy) |
-| Windows compile + 109 GUI tests | see the CI row below | `build-gui-windows` / `test-windows` on the branch push |
+| Windows compile + 109 GUI tests | PASS | run **37546378552** (`ce38af6`; `pull_request` twin 37546382954): `test-windows` ✓, `build-gui-windows` ✓ — build, **109 GUI tests**, stage, upload (`rdm-gui-windows-x86_64.exe`, 5,821,067 bytes); the compiler-error and test-failure annotation steps stayed skipped, and `release` skipped itself (not a tag) |
 | The tray on a real desktop | **NOT RUN in this environment** | Same escape as round 4 (`UX-ESC-005`): the fix is proven from the upstream source and the unit tests, and the exe is attached to the CI run for the reporter |
 
 ### 15.5 Change manifest (round 5)
@@ -479,6 +482,7 @@ why `theme::icons` exists and glyphs are banned).
 | `rdm-gui/src/views/help_overlay.rs` | changed | UI | window padding via `theme::window_frame` | Windows compile + layout test above |
 | `rdm-gui/src/views/settings_view.rs` | changed | UI | window padding via `theme::window_frame` | Windows compile + layout test above |
 | `TEST_INVENTORY.md` | changed | docs | GUI suite 104 → 109 with the new contracts | — |
+| `audits/ux-feature-pack-report.md`, `audits/evidence/ux-feature-pack-ci-runs.json` | changed | docs | this section and the run record | — |
 
 No user-facing copy, no colour and no workflow file moved; the CLI and its tests are
 untouched.
