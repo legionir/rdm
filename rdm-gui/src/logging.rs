@@ -4,9 +4,19 @@
 //! windowed program has no stderr worth reading, so the same events are routed
 //! into a ring buffer that the **App log** tab renders, and the verbosity can
 //! be changed at runtime through a `reload` layer.
+//!
+//! The same lines are appended to `rdm-gui.log` in the data directory. That is
+//! not decoration: when a user reports “the tray froze” (round 3), the window
+//! they would have to read the App log in is exactly the window the freeze has
+//! taken away from them — the file is what makes such a report diagnosable
+//! afterwards, including the lines the tray relays write from their own
+//! threads. It is one line at a time, flushed as it is written, so an abrupt
+//! exit (`std::process::exit`) cannot swallow it.
 
 use std::collections::VecDeque;
-use std::io;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write as _};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use tracing_subscriber::fmt::MakeWriter;
@@ -26,15 +36,24 @@ pub struct CapturedLine {
     pub text: String,
 }
 
-/// Shared, bounded buffer of formatted log lines.
+/// Shared, bounded buffer of formatted log lines (and the file beside it).
 #[derive(Clone, Default)]
 pub struct LogBuffer {
     lines: Arc<Mutex<VecDeque<CapturedLine>>>,
+    file: LogFile,
 }
 
 impl LogBuffer {
     pub fn new() -> Self {
         LogBuffer::default()
+    }
+
+    /// The same buffer, writing every line to `file` as well.
+    pub fn with_file(file: LogFile) -> Self {
+        LogBuffer {
+            file,
+            ..LogBuffer::default()
+        }
     }
 
     fn push(&self, raw: &str) {
@@ -54,6 +73,9 @@ impl LogBuffer {
             level,
             text: text.to_string(),
         });
+        // The file gets the same line here, the one place every line passes
+        // through: the window's App log is gone exactly when it is needed most.
+        self.file.append(raw);
     }
 
     /// Take everything captured since the last call.
@@ -83,7 +105,51 @@ fn split_level(line: &str) -> (&'static str, &str) {
     ("info", trimmed)
 }
 
-/// Writer handed to the `fmt` layer; appends whole lines to the buffer.
+/// The log file next to the metadata database, when one can be opened.
+///
+/// A log that cannot be written is not worth an error dialog: the app keeps the
+/// in-window log and carries on.
+#[derive(Clone, Default)]
+pub struct LogFile {
+    path: Option<Arc<PathBuf>>,
+}
+
+impl LogFile {
+    /// Open (append) `dir/rdm-gui.log`. `None` disables the file.
+    pub fn open(dir: Option<&Path>) -> Self {
+        let path = dir.map(|dir| dir.join("rdm-gui.log"));
+        if let Some(path) = &path {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if File::options().create(true).append(true).open(path).is_err() {
+                return Self { path: None };
+            }
+        }
+        Self {
+            path: path.map(Arc::new),
+        }
+    }
+
+    /// Where the file is, so the app can say so once at start-up.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref().map(PathBuf::as_path)
+    }
+
+    fn append(&self, line: &str) {
+        let Some(path) = &self.path else {
+            return;
+        };
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path.as_ref()) {
+            // One line per open, closed immediately: the file stays readable
+            // while the app runs, and a hard exit loses nothing already written.
+            let _ = writeln!(file, "{line}");
+        }
+    }
+}
+
+/// Writer handed to the `fmt` layer; appends whole lines to the buffer (which
+/// passes each one on to the log file).
 pub struct BufferWriter {
     buffer: LogBuffer,
 }
@@ -124,6 +190,12 @@ impl LogControl {
         &self.buffer
     }
 
+    /// Where the log file is, when one is being written.
+    pub fn log_file(&self) -> Option<&Path> {
+        // Borrowed from the live buffer, not from a clone of the handle.
+        self.buffer.file.path.as_deref().map(PathBuf::as_path)
+    }
+
     /// `directive` is one of [`LEVELS`] (or any `RUST_LOG` expression).
     pub fn set_level(&self, directive: &str) -> Result<(), String> {
         let filter = EnvFilter::try_new(directive).map_err(|e| e.to_string())?;
@@ -133,8 +205,8 @@ impl LogControl {
 
 /// Install the capturing subscriber. Returns `None` if one is already set
 /// (which only happens if the process installed a global subscriber before).
-pub fn install(default_level: &str) -> Option<LogControl> {
-    let buffer = LogBuffer::new();
+pub fn install(default_level: &str, data_dir: Option<&Path>) -> Option<LogControl> {
+    let buffer = LogBuffer::with_file(LogFile::open(data_dir));
     let initial = match EnvFilter::try_from_default_env() {
         Ok(filter) => filter,
         Err(_) => EnvFilter::try_new(default_level).unwrap_or_else(|_| EnvFilter::new("info")),
@@ -162,6 +234,29 @@ mod tests {
         assert_eq!(split_level("INFO probing https://x — ok"), ("info", "probing https://x — ok"));
         assert_eq!(split_level(" WARN  slow"), ("warn", "slow"));
         assert_eq!(split_level("no level here"), ("info", "no level here"));
+    }
+
+    #[test]
+    fn every_line_also_lands_in_the_log_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let buffer = LogBuffer::with_file(LogFile::open(Some(dir.path())));
+        buffer.push("INFO first");
+        buffer.push("WARN second");
+        // Read through the same public surface the app uses for the setting.
+        let written = std::fs::read_to_string(dir.path().join("rdm-gui.log")).expect("log file");
+        assert!(written.contains("INFO first"), "log file: {written:?}");
+        assert!(written.contains("WARN second"), "log file: {written:?}");
+        assert_eq!(buffer.drain().len(), 2, "the window keeps its lines too");
+    }
+
+    #[test]
+    fn a_missing_data_dir_disables_the_file_without_failing() {
+        // No directory to write to: the app must keep working, not refuse to
+        // start over a log file.
+        let buffer = LogBuffer::with_file(LogFile::open(None));
+        assert!(buffer.file.path.is_none());
+        buffer.push("INFO still captured in the window");
+        assert_eq!(buffer.drain().len(), 1);
     }
 
     #[test]

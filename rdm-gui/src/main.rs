@@ -14,11 +14,20 @@
 
 mod app;
 mod backend;
+mod clipboard;
+mod dropzone;
+mod frames;
+mod icon;
 mod logging;
+mod platform;
 mod settings;
 mod state;
+mod theme;
+mod tray;
 mod util;
+mod ux;
 mod views;
+mod windows;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -41,6 +50,8 @@ these flags, exactly like the CLI.
 
 fn main() -> ExitCode {
     let mut data_dir = PathBuf::from(".rdm");
+    // `--data-dir` outranks the saved value, so remember that it was given.
+    let mut data_dir_explicit = false;
     let mut verbosity: Option<&'static str> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -54,7 +65,10 @@ fn main() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             "-d" | "--data-dir" => match args.next() {
-                Some(dir) => data_dir = PathBuf::from(dir),
+                Some(dir) => {
+                    data_dir = PathBuf::from(dir);
+                    data_dir_explicit = true;
+                }
                 None => {
                     eprintln!("rdm-gui: --data-dir needs a value");
                     return ExitCode::from(2);
@@ -66,6 +80,7 @@ fn main() -> ExitCode {
             other => {
                 if let Some(dir) = other.strip_prefix("--data-dir=") {
                     data_dir = PathBuf::from(dir);
+                    data_dir_explicit = true;
                 } else {
                     eprintln!("rdm-gui: unexpected argument {other:?}\n\n{HELP}");
                     return ExitCode::from(2);
@@ -74,8 +89,10 @@ fn main() -> ExitCode {
         }
     }
 
-    let logging = logging::install(verbosity.unwrap_or("info"));
-    if let Err(err) = run(data_dir, logging, verbosity) {
+    // The log file lives next to the metadata database, so a report from a
+    // frozen window is still readable afterwards (`logging` module docs).
+    let logging = logging::install(verbosity.unwrap_or("info"), Some(&data_dir));
+    if let Err(err) = run(data_dir, data_dir_explicit, logging, verbosity) {
         eprintln!("rdm-gui: {err}");
         return ExitCode::from(1);
     }
@@ -84,21 +101,37 @@ fn main() -> ExitCode {
 
 fn run(
     data_dir: PathBuf,
+    data_dir_explicit: bool,
     logging: Option<logging::LogControl>,
     forced_level: Option<&'static str>,
 ) -> Result<(), eframe::Error> {
+    // Window geometry comes from the design tokens, like every other size.
+    let sizes = theme::Sizes::default();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1180.0, 760.0])
-            .with_min_inner_size([860.0, 560.0])
-            .with_title("RDM"),
+            .with_inner_size(sizes.window_default)
+            .with_min_inner_size(sizes.window_min)
+            .with_title("RDM")
+            // The same asset Explorer shows for rdm-gui.exe (build.rs) appears
+            // in the title bar, the taskbar and Alt-Tab.
+            .with_icon(std::sync::Arc::new(icon::window_icon())),
         ..Default::default()
     };
     eframe::run_native(
         "RDM",
         options,
-        Box::new(move |_cc| {
-            match app::RdmGuiApp::new(data_dir.clone(), logging.clone(), forced_level) {
+        Box::new(move |cc| {
+            // The tray's escape hatch needs the window handle *before* the first
+            // frame, and the app needs the context to ask for one. (The frame
+            // loop asks again — see `RdmGuiApp::update`.)
+            windows::remember_main_window_from(&*cc);
+            match app::RdmGuiApp::new(
+                cc,
+                data_dir.clone(),
+                data_dir_explicit,
+                logging.clone(),
+                forced_level,
+            ) {
                 Ok(app) => Ok(Box::new(app) as Box<dyn eframe::App>),
                 Err(err) => Err(Box::<dyn std::error::Error + Send + Sync>::from(format!(
                     "{err:#}"

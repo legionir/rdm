@@ -1,0 +1,836 @@
+//! UX policy for the rdm GUI: what needs confirmation, what the consequence
+//! text says, the status legend and the bulk-action microcopy.
+//!
+//! The policy is code — not prose — so that behaviour *and* wording are
+//! unit-tested (see the tests at the bottom and the static rules in
+//! `audits/ux-terminology-check.py`).
+//!
+//! Copy rules applied here:
+//!
+//! 1. name the action (`Remove`, `Drop`, `Restart`), never "OK";
+//! 2. state the consequence and whether it can be undone — never "Are you sure?";
+//! 3. end every dialog with the consequence of the *worst* choice ("Cannot be
+//!    undone.") and visually emphasise the safe option;
+//! 4. never expose implementation vocabulary (record, row, database, sqlite);
+//! 5. distinguish deliberate stops from accidents: `Cancelled` (user asked) vs
+//!    `Interrupted`/`Failed` (something went wrong), each with its own next step.
+
+use std::fmt;
+
+use rdm::models::DownloadState;
+
+/// Which confirmation a user-facing action asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confirm {
+    /// Nothing is discarded yet (queue drops, pause/resume) — act immediately
+    /// and report the outcome.
+    None,
+    /// Remove one download from the list.
+    RemoveOne,
+    /// Remove every completed download (bulk).
+    RemoveCompleted,
+    /// Download again from the beginning.
+    Restart,
+    /// Bulk drop of a long queue (see [`DROP_ALL_CONFIRM_THRESHOLD`]).
+    DropAll,
+}
+
+impl Confirm {
+    pub const ALL: [Confirm; 5] = [
+        Confirm::None,
+        Confirm::RemoveOne,
+        Confirm::RemoveCompleted,
+        Confirm::Restart,
+        Confirm::DropAll,
+    ];
+
+    /// Window title.
+    pub fn title(self) -> &'static str {
+        match self {
+            Confirm::None => "",
+            Confirm::RemoveOne => "Remove download",
+            Confirm::RemoveCompleted => "Remove completed downloads",
+            Confirm::Restart => "Restart from scratch",
+            Confirm::DropAll => "Drop all queued downloads",
+        }
+    }
+
+    /// Label of the confirming (destructive) button.
+    pub fn confirm_label(self) -> &'static str {
+        match self {
+            Confirm::None => "",
+            Confirm::RemoveOne => "Remove",
+            Confirm::RemoveCompleted => "Remove",
+            Confirm::Restart => "Restart",
+            Confirm::DropAll => "Drop them",
+        }
+    }
+
+    /// Label of the safe option — named after what it keeps, not "Cancel".
+    pub fn keep_label(self) -> &'static str {
+        match self {
+            Confirm::None => "",
+            Confirm::RemoveOne | Confirm::RemoveCompleted => "Keep",
+            Confirm::Restart => "Keep the progress",
+            Confirm::DropAll => "Keep them",
+        }
+    }
+
+    /// Does the dialog offer "also delete the finished file"?
+    pub fn has_file_checkbox(self) -> bool {
+        matches!(self, Confirm::RemoveOne | Confirm::RemoveCompleted)
+    }
+
+    /// Consequence text. `subject` is how many downloads are involved.
+    pub fn body(self, subject: usize) -> String {
+        match self {
+            Confirm::None => String::new(),
+            Confirm::RemoveOne => "This removes the download from the list and discards its \
+                 partial data. Tick the box to delete the finished file too. Cannot be undone."
+                .to_string(),
+            Confirm::RemoveCompleted => format!(
+                "This removes {subject} completed download(s) from the list and discards their \
+                 partial data. The finished files stay on disk unless you tick the box below to \
+                 delete the finished file(s) as well. Cannot be undone."
+            ),
+            Confirm::Restart => "This discards the progress of this download, downloads it again \
+                 from the beginning and overwrites the file at the output path. Cannot be undone."
+                .to_string(),
+            Confirm::DropAll => format!(
+                "This drops {subject} queued download(s) before they start; nothing has been \
+                 downloaded yet, so no partial data is lost. You can add them again later. \
+                 Cannot be undone."
+            ),
+        }
+    }
+}
+
+/// Every action that destroys user data, with the strongest confirmation it
+/// asks for. Adding an action without a row here fails the unit test.
+///
+/// `Drop all` asks only above [`DROP_ALL_CONFIRM_THRESHOLD`]: dropping a queued
+/// download loses nothing that has been fetched, but silently emptying a long
+/// queue is still an easy mistake, so a long queue gets a dialog.
+pub const DESTRUCTIVE: [(&str, Confirm); 5] = [
+    ("Remove one download", Confirm::RemoveOne),
+    ("Remove completed downloads", Confirm::RemoveCompleted),
+    ("Restart from scratch", Confirm::Restart),
+    ("Drop one queued download", Confirm::None),
+    ("Drop all queued downloads", Confirm::DropAll),
+];
+
+/// Queued downloads at which *Drop all* starts to ask. Below the threshold the
+/// action is immediate (nothing has been downloaded yet); at or above it the
+/// user confirms, because reparsing a long queue by hand is the real cost.
+pub const DROP_ALL_CONFIRM_THRESHOLD: usize = 5;
+
+/// The confirmation *Drop all* uses for a queue of `queued` downloads.
+pub fn drop_all_confirm(queued: usize) -> Confirm {
+    if queued >= DROP_ALL_CONFIRM_THRESHOLD {
+        Confirm::DropAll
+    } else {
+        Confirm::None
+    }
+}
+
+/// Bulk actions offered by the toolbar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BulkAction {
+    PauseAll,
+    ResumeAll,
+    RemoveCompleted,
+    DropQueue,
+}
+
+impl BulkAction {
+    pub const ALL: [BulkAction; 4] = [
+        BulkAction::PauseAll,
+        BulkAction::ResumeAll,
+        BulkAction::RemoveCompleted,
+        BulkAction::DropQueue,
+    ];
+
+    /// Outcome when the action had work to do (a count is always reported).
+    pub fn done(self, count: usize) -> String {
+        match self {
+            BulkAction::PauseAll => format!("Pause requested for {count} download(s)."),
+            BulkAction::ResumeAll => format!("Continuing {count} download(s)."),
+            BulkAction::RemoveCompleted => {
+                format!("Removed {count} completed download(s) from the list.")
+            }
+            BulkAction::DropQueue => format!("Dropped {count} queued download(s)."),
+        }
+    }
+
+    /// Outcome when nothing matched. Saying what was missing is more useful
+    /// than "0 download(s)": it tells the user why nothing happened.
+    pub fn nothing_to_do(self) -> &'static str {
+        match self {
+            BulkAction::PauseAll => "Nothing to pause — no download is running.",
+            BulkAction::ResumeAll => {
+                "Nothing to continue — no download is paused, interrupted or cancelled."
+            }
+            BulkAction::RemoveCompleted => "Nothing to remove — no completed download in the list.",
+            BulkAction::DropQueue => "Nothing to drop — the queue is empty.",
+        }
+    }
+}
+
+/// Outcome copy for *Resume all*: it continues only what `resume()` accepts, so
+/// failed downloads are named as needing *Restart* instead of being skipped
+/// silently (the engine rejects them — see `Backend::resume`).
+pub fn resume_all_outcome(continued: usize, needs_restart: usize) -> String {
+    let mut text = if continued == 0 {
+        BulkAction::ResumeAll.nothing_to_do().to_string()
+    } else {
+        BulkAction::ResumeAll.done(continued)
+    };
+    if needs_restart > 0 {
+        text.push_str(&format!(
+            " {needs_restart} failed download(s) cannot continue — use Restart on them."
+        ));
+    }
+    text
+}
+
+/// Keyboard shortcuts shown in the in-app help, so the map does not live only
+/// in the README and in hovering.
+pub const SHORTCUTS: [(&str, &str); 8] = [
+    ("Enter", "open the details of the selected download"),
+    ("Up / Down", "move the selection"),
+    ("Esc", "close the top-most window, dialog or panel"),
+    ("Ctrl+F", "focus the search box"),
+    ("F5", "refresh the list"),
+    ("F1", "open this help"),
+    ("Tab / Shift+Tab", "move between controls"),
+    ("Space", "activate the focused button or checkbox"),
+];
+
+/// One section of the in-app help: a heading and its lines.
+/// Desktop-integration facts (tray, clipboard, drop target) — the words the
+/// Settings checkboxes and the in-app help share, in one list.
+pub const DESKTOP_HELP: [&str; 6] = [
+    "Closing the window hides rdm in the notification area (the tray); transfers keep running and “Quit rdm” there really exits.",
+    "A session without a tray host keeps the usual close behaviour, so rdm never hides where it cannot be reached.",
+    "New download fills the URL from the clipboard when it holds a link, and selects it: Enter starts the transfer.",
+    "The floating drop target is a small always-on-top box above the taskbar clock — drop a link from a browser on it and the New download form opens with that link.",
+    "A link or file dropped on the window itself takes the same path; anything that is not a link is reported in the status bar instead of being ignored.",
+    "Settings, Desktop integration holds those three switches; the tray menu toggles the floating drop target too.",
+];
+
+pub fn help_sections() -> Vec<(&'static str, Vec<String>)> {
+    vec![
+        (
+            "What the states mean",
+            LEGEND
+                .iter()
+                .map(|entry| format!("{} — {}. Next: {}", entry.state, entry.meaning, entry.next_step))
+                .collect(),
+        ),
+        (
+            "Keyboard",
+            SHORTCUTS
+                .iter()
+                .map(|(keys, what)| format!("{keys} — {what}"))
+                .collect(),
+        ),
+        (
+            "Window, tray and desktop",
+            DESKTOP_HELP.iter().map(|line| line.to_string()).collect(),
+        ),
+        (
+            "Words used by rdm",
+            GLOSSARY
+                .iter()
+                .map(|entry| format!("{} — {}", entry.term, entry.meaning))
+                .collect(),
+        ),
+    ]
+}
+
+impl fmt::Display for BulkAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            BulkAction::PauseAll => "Pause all",
+            BulkAction::ResumeAll => "Resume all",
+            BulkAction::RemoveCompleted => "Remove completed…",
+            BulkAction::DropQueue => "Drop all",
+        })
+    }
+}
+
+/// A state, what it means in plain words, and what the user can do next.
+/// Surfaced as a tooltip on every state chip, on the status bar counters and
+/// under the state in the details modal, so the meaning is always one hover
+/// away (WCAG 3.3.5 Help is available).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LegendEntry {
+    pub state: DownloadState,
+    pub meaning: &'static str,
+    pub next_step: &'static str,
+}
+
+impl LegendEntry {
+    pub fn hover_text(&self) -> String {
+        format!(
+            "{} — {}. Next: {}",
+            self.state,
+            self.meaning,
+            self.next_step
+        )
+    }
+}
+
+/// Definitions follow the verified behaviour of the engine and the GUI bridge:
+///
+/// * `Paused` is always a deliberate stop; `Interrupted` and `Failed` are not.
+/// * `Cancelled` keeps its partial data and `Backend::resume` accepts it.
+/// * `Failed` is terminal for `Backend::resume` (it rejects terminal states
+///   except `Cancelled`), so the only recovery offered is `Restart`.
+pub const LEGEND: [LegendEntry; 8] = [
+    LegendEntry {
+        state: DownloadState::Queued,
+        meaning: "accepted and waiting for a free slot",
+        next_step: "raise “Max concurrent downloads”, or drop it from the queue",
+    },
+    LegendEntry {
+        state: DownloadState::Running,
+        meaning: "downloading right now",
+        next_step: "Pause keeps the progress and stops the transfer",
+    },
+    LegendEntry {
+        state: DownloadState::Merging,
+        meaning: "the last parts are being written into the finished file",
+        next_step: "wait for it to finish",
+    },
+    LegendEntry {
+        state: DownloadState::Paused,
+        meaning: "stopped on request; the progress is kept",
+        next_step: "Resume continues from where it stopped",
+    },
+    LegendEntry {
+        state: DownloadState::Interrupted,
+        meaning: "the transfer stopped unexpectedly; the progress is kept",
+        next_step: "Resume continues from where it stopped",
+    },
+    LegendEntry {
+        state: DownloadState::Completed,
+        meaning: "the file is finished",
+        next_step: "Open folder to use it, or Remove to clean up the list",
+    },
+    LegendEntry {
+        state: DownloadState::Cancelled,
+        meaning: "stopped before finishing; the partial data is kept",
+        next_step: "Resume continues it, Remove discards it",
+    },
+    LegendEntry {
+        state: DownloadState::Failed,
+        meaning: "the transfer failed after the configured retries",
+        next_step: "Restart downloads it again from the beginning",
+    },
+];
+
+/// The legend entry for a state (always present — asserted by a test).
+pub fn legend_for(state: DownloadState) -> &'static LegendEntry {
+    LEGEND
+        .iter()
+        .find(|entry| entry.state == state)
+        .expect("every DownloadState has a legend entry (tested)")
+}
+
+/// The whole legend as one tooltip for the status bar counters.
+pub fn legend_tooltip() -> String {
+    let mut out = String::from("What the states mean:\n");
+    for entry in LEGEND {
+        out.push_str(&format!(
+            "• {} — {}. Next: {}\n",
+            entry.state, entry.meaning, entry.next_step
+        ));
+    }
+    out.push_str("Hover a download's state to see the same explanation.");
+    out
+}
+
+// --------------------------------------------------------------- row actions
+
+/// Tooltip for the pause button (only offered while a download is running).
+pub fn pause_tooltip() -> &'static str {
+    "Pause — stop the transfer and keep the progress"
+}
+
+/// Tooltip for the stop button (only offered while a download is running).
+pub fn cancel_tooltip() -> &'static str {
+    "Cancel — stop the transfer; the partial data is kept"
+}
+
+/// Tooltip for the resume button. Never offered for `Failed` or `Completed`: a
+/// failed download cannot be continued (the engine only restarts it), so the
+/// row offers Restart instead of a button that would only produce an error.
+pub fn resume_tooltip() -> &'static str {
+    "Resume — continue this download where it stopped"
+}
+
+/// Tooltip for the restart button; the wording depends on what would be lost.
+pub fn restart_tooltip(state: DownloadState) -> &'static str {
+    match state {
+        DownloadState::Failed => {
+            "Restart from scratch — a failed download cannot be continued; this asks first"
+        }
+        DownloadState::Completed => {
+            "Download again from the beginning — asks first and overwrites the file"
+        }
+        _ => "Restart from scratch — discards the progress, asks first",
+    }
+}
+
+/// Tooltip for the 🗑 button. While a download is running the button is
+/// disabled and explains the order of operations instead of failing later.
+pub fn remove_tooltip(running: bool) -> &'static str {
+    if running {
+        "Remove is unavailable while the download runs — pause or cancel it first"
+    } else {
+        "Remove — take it out of the list; asks first what to do with the file"
+    }
+}
+
+/// Tooltip for the 📂 button.
+pub fn open_folder_tooltip() -> &'static str {
+    "Open folder — show the finished file in your file manager"
+}
+
+/// Tooltip for the toolbar's “Remove completed…” button.
+pub fn remove_completed_tooltip() -> &'static str {
+    "Remove every completed download from the list (asks first; files are kept unless you tick the box)"
+}
+
+/// Tooltip for “Drop all queued downloads”.
+pub fn drop_queue_tooltip() -> &'static str {
+    "Drop every queued download — nothing has been downloaded yet"
+}
+
+/// Tooltip for “Resume all”.
+pub fn resume_all_tooltip() -> &'static str {
+    "Continue every paused, interrupted or cancelled download (rdm resume <ID>)"
+}
+
+/// Tooltip of the URL field: what the field accepts and where the value can
+/// come from.
+pub const URL_FIELD_HINT: &str = "A link starting with http:// or https:// — copied from your browser, \
+dropped on the window, or filled in from the clipboard";
+
+/// Tooltip for the *New download* toolbar button: the clipboard rule is worth
+/// saying out loud, because it is the fastest path in the app.
+pub fn new_download_tooltip(prefill: bool) -> &'static str {
+    if prefill {
+        "New download — a link on the clipboard is filled in automatically"
+    } else {
+        "New download — paste a link (or turn on “Fill the URL from the clipboard”)"
+    }
+}
+
+/// What the status bar says when a drop target link is accepted.
+pub fn drop_accepted(url: &str) -> String {
+    format!("Link accepted — the New download form opened with {url}")
+}
+
+/// A drop carried no readable link, but the clipboard had one — say both, so
+/// nobody has to guess where the form got its URL from.
+pub fn drop_used_clipboard(url: &str) -> String {
+    format!("That drop carried no readable link — used the clipboard link instead: {url}")
+}
+
+/// Hint shown under a path field whose value still carries the doubled
+/// separators written by rdm versions before the Bug-A fix.
+///
+/// The defect could not be repaired automatically: in a saved value a `\\`
+/// pair is indistinguishable from a legitimate UNC share (`\\server\share`)
+/// or an extended-length path (`\\?\C:\…`), and rewriting either would break
+/// it. So the value is preserved, and the user is told what it is and how to
+/// clean it — silently rewriting user data is never the answer.
+pub const DOUBLED_SEPARATOR_HINT: &str =
+    "Doubled separators — written by an older rdm build. Windows normally treats them as one; pick the folder again to clean it up.";
+
+/// Does `value` look like a path carrying the old doubled separators?
+///
+/// Only a pair that starts *after* the first two characters counts, so a UNC
+/// share (`\\server\share`) and an extended-length path (`\\?\C:\…`) are
+/// never flagged. Returns the hint to render, or `None` for a clean value.
+pub fn doubled_separator_hint(value: &str) -> Option<&'static str> {
+    // `\\` is a wrong pair only when it is not the UNC/extended-length prefix.
+    let flagged = value
+        .match_indices("\\\\")
+        .any(|(index, _)| index >= 2);
+    flagged.then_some(DOUBLED_SEPARATOR_HINT)
+}
+
+/// Tip shown in the New download dialog: where the filename comes from.
+pub const ADD_TIP: &str = "Tip: choose a folder in “Output” to keep the server-provided filename.";
+
+/// Tooltip for “Pause all”.
+pub fn pause_all_tooltip() -> &'static str {
+    "Stop every running download, keeping its progress (rdm pause <ID>)"
+}
+
+/// Vocabulary the product commits to (detailed in `audits/ux-glossary.md`).
+/// `rejected` lists the synonyms that must not appear in user-facing copy.
+pub struct Glossary {
+    pub term: &'static str,
+    pub meaning: &'static str,
+    pub rejected: &'static [&'static str],
+}
+
+pub const GLOSSARY: [Glossary; 5] = [
+    Glossary {
+        term: "download",
+        meaning: "one file rdm was asked to fetch; it survives restarts of the app",
+        rejected: &["job", "record", "row", "item", "task"],
+    },
+    Glossary {
+        term: "queue",
+        meaning: "downloads that are accepted but not started yet",
+        rejected: &["pending list", "waiting list"],
+    },
+    Glossary {
+        term: "partial data",
+        meaning: "the bytes already fetched for an unfinished download; only Remove discards it",
+        rejected: &["temp files", "part files"],
+    },
+    Glossary {
+        term: "Remove",
+        meaning: "take a download out of the list; the finished file stays unless said otherwise",
+        rejected: &["Clear", "Delete (for downloads)"],
+    },
+    Glossary {
+        term: "Drop",
+        meaning: "take a queued download out of the queue before it starts",
+        rejected: &["Clear (for the queue)"],
+    },
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::ALL_STATES;
+
+    /// Copy that must never reach a user-facing string.
+    const JARGON: [&str; 6] = ["job", "record", "row", "database", "sqlite", "are you sure"];
+
+    fn all_copy() -> Vec<String> {
+        let mut copy = Vec::new();
+        for confirm in Confirm::ALL {
+            copy.push(confirm.title().to_string());
+            copy.push(confirm.confirm_label().to_string());
+            copy.push(confirm.keep_label().to_string());
+            copy.push(confirm.body(3));
+        }
+        for action in BulkAction::ALL {
+            copy.push(action.to_string());
+            copy.push(action.done(3));
+            copy.push(action.nothing_to_do().to_string());
+        }
+        for entry in LEGEND {
+            copy.push(entry.hover_text());
+        }
+        for tooltip in [
+            pause_tooltip(),
+            cancel_tooltip(),
+            resume_tooltip(),
+            remove_tooltip(false),
+            remove_tooltip(true),
+            open_folder_tooltip(),
+            remove_completed_tooltip(),
+            drop_queue_tooltip(),
+            new_download_tooltip(true),
+            new_download_tooltip(false),
+            URL_FIELD_HINT,
+            ADD_TIP,
+            resume_all_tooltip(),
+            pause_all_tooltip(),
+        ] {
+            copy.push(tooltip.to_string());
+        }
+        // Dynamic copy: the drop confirmation names the link it accepted
+        // (checked in `the_clipboard_shortcut_is_described_in_the_tooltip_it_changes`).
+        copy.push(drop_accepted("https://example.com/x.zip"));
+        for state in ALL_STATES {
+            copy.push(restart_tooltip(state).to_string());
+        }
+        copy.push(DOUBLED_SEPARATOR_HINT.to_string());
+        copy.push(drop_used_clipboard("https://example.com/y.zip"));
+        copy.push(legend_tooltip());
+        copy.push(resume_all_outcome(3, 2));
+        copy.push(resume_all_outcome(0, 2));
+        for (_, lines) in help_sections() {
+            copy.extend(lines);
+        }
+        for (keys, what) in SHORTCUTS {
+            copy.push(format!("{keys} — {what}"));
+        }
+        copy
+    }
+
+    #[test]
+    fn every_data_destroying_action_has_a_confirmation_policy() {
+        assert_eq!(DESTRUCTIVE.len(), 5);
+        let with_dialog: Vec<&str> = DESTRUCTIVE
+            .iter()
+            .filter(|(_, confirm)| *confirm != Confirm::None)
+            .map(|(action, _)| *action)
+            .collect();
+        assert_eq!(
+            with_dialog.len(),
+            4,
+            "remove, bulk remove, restart and a long queue drop ask first"
+        );
+        for (action, confirm) in DESTRUCTIVE {
+            assert!(!action.is_empty());
+            if confirm != Confirm::None {
+                assert!(
+                    confirm.has_file_checkbox()
+                        || confirm == Confirm::Restart
+                        || confirm == Confirm::DropAll
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_short_queue_is_dropped_at_once_a_long_one_asks() {
+        assert_eq!(drop_all_confirm(DROP_ALL_CONFIRM_THRESHOLD - 1), Confirm::None);
+        assert_eq!(drop_all_confirm(DROP_ALL_CONFIRM_THRESHOLD), Confirm::DropAll);
+        assert_eq!(drop_all_confirm(0), Confirm::None);
+        let body = Confirm::DropAll.body(DROP_ALL_CONFIRM_THRESHOLD);
+        assert!(body.contains("no partial data is lost"));
+        assert!(body.contains("Cannot be undone"));
+        assert!(!Confirm::DropAll.has_file_checkbox());
+    }
+
+    #[test]
+    fn resume_all_names_the_failed_downloads_it_cannot_continue() {
+        let mixed = resume_all_outcome(3, 2);
+        assert!(mixed.contains('3'), "{mixed}");
+        assert!(mixed.contains("2 failed download(s) cannot continue"), "{mixed}");
+        assert!(mixed.contains("Restart"));
+        let none_left = resume_all_outcome(3, 0);
+        assert!(!none_left.contains("cannot continue"));
+        let nothing = resume_all_outcome(0, 1);
+        assert!(nothing.starts_with("Nothing to continue"), "{nothing}");
+        assert!(nothing.contains("1 failed download(s)"));
+    }
+
+    #[test]
+    fn the_legacy_separator_hint_fires_for_corrupted_values_and_never_for_unc() {
+        // Bug A legacy values: the hint explains them instead of leaving the
+        // user thinking the defect is still there.
+        assert!(doubled_separator_hint(r"C:\\download\\rdm").is_some());
+        assert!(doubled_separator_hint(r"C:\\download").is_some());
+        assert!(doubled_separator_hint(r"\\\\server\\share").is_some());
+        assert!(doubled_separator_hint(r"\\?\\C:\\very\\long").is_some());
+        // Clean values, UNC shares and extended-length paths are not flagged.
+        for clean in [
+            r"C:\download\rdm",
+            "",
+            "relative/path",
+            r"\\server\share",
+            r"\\?\C:\very\long",
+            "/home/user/downloads",
+        ] {
+            assert!(
+                doubled_separator_hint(clean).is_none(),
+                "{clean:?} must not be flagged"
+            );
+        }
+        // The hint names the situation and the fix, per the copy rules.
+        let hint = doubled_separator_hint(r"C:\\x").unwrap();
+        assert!(hint.contains("separators"));
+        assert!(hint.contains("pick the folder again"));
+    }
+
+    #[test]
+    fn the_clipboard_shortcut_is_described_in_the_tooltip_it_changes() {
+        let on = new_download_tooltip(true);
+        let off = new_download_tooltip(false);
+        assert!(on.contains("filled in automatically"), "{on}");
+        assert!(off.contains("turn on"), "{off}");
+        assert_ne!(on, off);
+        // The drop confirmation names the link, so a surprise import is traceable.
+        assert!(drop_accepted("https://example.com/a.zip").contains("https://example.com/a.zip"));
+    }
+
+    #[test]
+    fn help_covers_states_shortcuts_and_vocabulary() {
+        let sections = help_sections();
+        assert_eq!(sections.len(), 4);
+        for (heading, lines) in &sections {
+            assert!(!heading.is_empty());
+            assert_eq!(
+                lines.len(),
+                match *heading {
+                    "What the states mean" => ALL_STATES.len(),
+                    "Keyboard" => SHORTCUTS.len(),
+                    "Window, tray and desktop" => DESKTOP_HELP.len(),
+                    _ => GLOSSARY.len(),
+                },
+                "{heading} lists every entry"
+            );
+        }
+        // The new section has to answer the questions closing/tray raise.
+        let desktop = sections
+            .iter()
+            .find(|(heading, _)| *heading == "Window, tray and desktop")
+            .expect("the desktop section is part of help");
+        for word in ["tray", "clipboard", "drop target"] {
+            assert!(
+                desktop.1.iter().any(|line| line.contains(word)),
+                "the help mentions {word}"
+            );
+        }
+    }
+
+    #[test]
+    fn confirmations_state_the_consequence_and_the_undo_status() {
+        for confirm in [
+            Confirm::RemoveOne,
+            Confirm::RemoveCompleted,
+            Confirm::Restart,
+            Confirm::DropAll,
+        ] {
+            let body = confirm.body(2);
+            assert!(
+                body.contains("Cannot be undone"),
+                "{:?} must say whether it can be undone",
+                confirm
+            );
+            assert!(
+                body.len() > 40,
+                "{:?} must describe the consequence, not just ask",
+                confirm
+            );
+        }
+        for confirm in [Confirm::RemoveOne, Confirm::RemoveCompleted] {
+            let body = confirm.body(2);
+            assert!(body.contains("removes"), "{:?} names the action", confirm);
+            assert!(body.contains("partial data"), "{:?} says what is lost", confirm);
+            assert!(
+                body.contains("delete the finished file"),
+                "{:?} explains the file checkbox and its file consequence",
+                confirm
+            );
+            assert!(confirm.has_file_checkbox());
+        }
+        let restart = Confirm::Restart.body(1);
+        assert!(restart.contains("from the beginning"));
+        assert!(restart.contains("overwrites"));
+        assert!(!Confirm::Restart.has_file_checkbox(), "restart keeps the file");
+    }
+
+    #[test]
+    fn the_safe_option_is_named_after_what_it_keeps() {
+        for confirm in [Confirm::RemoveOne, Confirm::RemoveCompleted, Confirm::Restart] {
+            let keep = confirm.keep_label().to_lowercase();
+            assert!(
+                keep.starts_with("keep"),
+                "{:?} must offer a named way out, not “Cancel”",
+                confirm
+            );
+        }
+    }
+
+    #[test]
+    fn bulk_actions_name_the_count_and_explain_the_empty_case() {
+        for action in BulkAction::ALL {
+            let done = action.done(7);
+            assert!(done.contains('7'), "{action} reports the count: {done}");
+            let nothing = action.nothing_to_do();
+            assert!(
+                nothing.starts_with("Nothing to"),
+                "{action} explains the empty case: {nothing}"
+            );
+            assert!(
+                !nothing.chars().any(|c| c.is_ascii_digit()),
+                "{action} must not report “0” as an outcome: {nothing}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_state_has_a_legend_entry_with_a_next_step() {
+        for state in ALL_STATES {
+            let entry = legend_for(state);
+            assert_eq!(entry.state, state);
+            assert!(!entry.meaning.is_empty());
+            assert!(!entry.next_step.is_empty());
+            assert!(legend_tooltip().contains(state.as_str()));
+        }
+    }
+
+    #[test]
+    fn failed_and_completed_never_offer_resume() {
+        // Verified behaviour: `Backend::resume` rejects terminal states except
+        // Cancelled, so the row must offer Restart instead of a dead end.
+        assert!(restart_tooltip(DownloadState::Failed).contains("cannot be continued"));
+        for state in [DownloadState::Failed, DownloadState::Completed] {
+            let tooltip = restart_tooltip(state);
+            assert!(!tooltip.contains("continue this download"), "{state}");
+        }
+        assert!(resume_tooltip().contains("continue"));
+    }
+
+    #[test]
+    fn removing_a_running_download_explains_the_order_of_operations() {
+        let tooltip = remove_tooltip(true);
+        assert!(tooltip.contains("unavailable"));
+        assert!(tooltip.contains("pause or cancel"));
+        assert!(remove_tooltip(false).starts_with("Remove"));
+    }
+
+    #[test]
+    fn no_user_facing_copy_uses_implementation_jargon() {
+        for text in all_copy() {
+            let lower = text.to_lowercase();
+            for bad in JARGON {
+                assert!(
+                    !contains_word(&lower, bad),
+                    "copy {text:?} contains forbidden term {bad:?}"
+                );
+            }
+        }
+    }
+
+    /// Whole-word (or whole-phrase) match, case-insensitive.
+    fn contains_word(haystack: &str, needle: &str) -> bool {
+        let words: Vec<String> = haystack
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(|w| w.to_lowercase())
+            .collect();
+        let needle_words: Vec<String> = needle
+            .split_whitespace()
+            .map(|w| w.to_lowercase())
+            .collect();
+        if needle_words.is_empty() || words.len() < needle_words.len() {
+            return false;
+        }
+        words
+            .windows(needle_words.len())
+            .any(|w| w == needle_words.as_slice())
+    }
+
+    #[test]
+    fn the_glossary_rejects_a_synonym_for_every_term() {
+        for entry in GLOSSARY {
+            assert!(!entry.term.is_empty());
+            assert!(!entry.meaning.is_empty());
+            assert!(
+                !entry.rejected.is_empty(),
+                "{} must list the terms we do not use",
+                entry.term
+            );
+        }
+        // Preferred terms must actually be the ones in the copy.
+        let copy = all_copy().join("\n").to_lowercase();
+        for term in ["download", "queue", "remove", "drop", "progress"] {
+            assert!(copy.contains(term), "the copy uses {term}");
+        }
+    }
+}

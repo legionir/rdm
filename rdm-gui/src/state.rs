@@ -16,17 +16,24 @@ pub enum UiAction {
     Pause(i64),
     Resume(i64),
     Cancel(i64),
+    /// Confirmed restart (the dialog was accepted, or confirmations are off).
     Restart(i64),
     Remove { id: i64, purge: bool },
+    RemoveCompletedConfirmed { purge: bool },
     AskRemove(i64),
+    AskRemoveCompleted,
+    /// Row ⟲ button: asks first because the progress is discarded.
+    AskRestart(i64),
     Select(i64),
     Refresh,
     PauseAll,
     ResumeAll,
-    RemoveCompleted,
     CopyToClipboard(String),
-    CancelPending(u64),
-    ClearQueue,
+    /// Drop one queued download (nothing has been downloaded yet).
+    DropQueued(u64),
+    DropQueue,
+    /// Bulk drop that asks first when the queue is long.
+    AskDropQueue,
     OpenOutputFolder(i64),
     /// Double-click on a row: open the details modal for this download.
     OpenDetails(i64),
@@ -34,6 +41,8 @@ pub enum UiAction {
     ReloadSettings,
     ApplyDataDir,
     ClearLog,
+    /// Toggle the in-app help (state legend, shortcuts, vocabulary).
+    ToggleHelp,
 }
 
 /// Which tab of the details modal is open.
@@ -52,6 +61,52 @@ impl DetailTab {
             DetailTab::Overview => "Overview",
             DetailTab::Chunks => "Chunks",
             DetailTab::Json => "JSON",
+        }
+    }
+}
+
+/// A destructive action waiting for the user's decision. Exactly one
+/// confirmation is open at a time; the copy comes from [`crate::ux::Confirm`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingConfirm {
+    /// Remove one download; `label` identifies it in the dialog.
+    Remove { id: i64, label: String },
+    /// Remove every completed download (`subject` = how many).
+    RemoveCompleted { subject: usize },
+    /// Download again from the beginning.
+    Restart { id: i64, label: String },
+    /// Bulk drop of a long queue.
+    DropQueue { subject: usize },
+}
+
+impl PendingConfirm {
+    /// The confirmation policy entry backing this dialog.
+    pub fn policy(&self) -> crate::ux::Confirm {
+        match self {
+            PendingConfirm::Remove { .. } => crate::ux::Confirm::RemoveOne,
+            PendingConfirm::RemoveCompleted { .. } => crate::ux::Confirm::RemoveCompleted,
+            PendingConfirm::Restart { .. } => crate::ux::Confirm::Restart,
+            PendingConfirm::DropQueue { .. } => crate::ux::Confirm::DropAll,
+        }
+    }
+
+    /// How many downloads the dialog talks about.
+    pub fn subject(&self) -> usize {
+        match self {
+            PendingConfirm::Remove { .. } | PendingConfirm::Restart { .. } => 1,
+            PendingConfirm::RemoveCompleted { subject } | PendingConfirm::DropQueue { subject } => {
+                *subject
+            }
+        }
+    }
+
+    /// The download the dialog identifies (for the safe-action copy).
+    pub fn label(&self) -> Option<&str> {
+        match self {
+            PendingConfirm::Remove { label, .. } | PendingConfirm::Restart { label, .. } => {
+                Some(label)
+            }
+            PendingConfirm::RemoveCompleted { .. } | PendingConfirm::DropQueue { .. } => None,
         }
     }
 }
@@ -132,6 +187,13 @@ pub struct GuiState {
     pub detail_tab: DetailTab,
     /// Which box the footer bar has expanded (`None` = collapsed).
     pub footer_panel: Option<FooterPanel>,
+    /// Whether the in-app help overlay is visible (`F1`).
+    pub show_help: bool,
+    /// The *New download* field should get the caret (set by the tray/drop
+    /// target or when the URL was pre-filled from the clipboard).
+    pub focus_url: bool,
+    /// Mirror of *Fill the URL from the clipboard*; the toolbar text follows it.
+    pub prefill_from_clipboard: bool,
     /// Whether the settings sidebar is visible (toggled from the top menu).
     pub show_settings: bool,
     /// Whether the queue sidebar is visible (toggled from the top menu).
@@ -143,11 +205,15 @@ pub struct GuiState {
     pub status: String,
     pub status_is_error: bool,
     pub rates: HashMap<i64, RateTracker>,
-    pub pending_remove: Option<(i64, String)>,
+    /// The open confirmation dialog, if any (see [`PendingConfirm`]).
+    pub pending_confirm: Option<PendingConfirm>,
     pub data_dir_input: String,
     pub settings_dirty: bool,
     /// Hide log lines below this level in the App log tab.
     pub log_filter: usize,
+    /// Set by the `Ctrl+F` shortcut; the toolbar consumes it by focusing the
+    /// search box on the next frame.
+    pub focus_search: bool,
     /// Snapshot of the backend queue, refreshed every frame.
     pub queue: Vec<crate::backend::PendingJob>,
 }
@@ -166,6 +232,9 @@ impl GuiState {
             detail_id: None,
             detail_tab: DetailTab::Overview,
             footer_panel: None,
+            show_help: false,
+            focus_url: false,
+            prefill_from_clipboard: true,
             show_settings: false,
             show_queue: false,
             chunks: Vec::new(),
@@ -175,10 +244,11 @@ impl GuiState {
             status: "ready".to_string(),
             status_is_error: false,
             rates: HashMap::new(),
-            pending_remove: None,
+            pending_confirm: None,
             data_dir_input: data_dir,
             settings_dirty: false,
             log_filter: 0,
+            focus_search: false,
             queue: Vec::new(),
         }
     }
@@ -278,7 +348,7 @@ impl GuiState {
             .collect()
     }
 
-    /// (completed, waiting, active, failed, other) counters for the status bar.
+    /// (completed, queued, running, failed, cancelled) counters for the status bar.
     pub fn counts(&self) -> (usize, usize, usize, usize, usize) {
         let mut c = (0usize, 0usize, 0usize, 0usize, 0usize);
         for r in &self.downloads {

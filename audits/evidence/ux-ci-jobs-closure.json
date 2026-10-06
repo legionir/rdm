@@ -1,0 +1,82 @@
+[
+  {
+    "name": "test-windows",
+    "conclusion": "success",
+    "steps": [
+      {
+        "name": "Set up job",
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "conclusion": "success"
+      },
+      {
+        "name": "Install Rust",
+        "conclusion": "success"
+      },
+      {
+        "name": "Disable vendored crates.io (Windows line endings break vendor checksums)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Unit + integration tests",
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "name": "build-gui-windows",
+    "conclusion": "success",
+    "steps": [
+      {
+        "name": "Set up job",
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "conclusion": "success"
+      },
+      {
+        "name": "Install Rust",
+        "conclusion": "success"
+      },
+      {
+        "name": "Disable vendored crates.io",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build GUI binary",
+        "conclusion": "success"
+      },
+      {
+        "name": "Test GUI crate",
+        "conclusion": "success"
+      },
+      {
+        "name": "Stage GUI binary",
+        "conclusion": "success"
+      },
+      {
+        "name": "Upload GUI artifact",
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "conclusion": "success"
+      }
+    ]
+  }
+]

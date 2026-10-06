@@ -22,13 +22,93 @@
 - src/cli/commands.rs: 7 new (parse_checksum ×3, opts_parse ×3, connections_range)
 - tests/cli_real.rs: 2 new (help/version, bad-url graceful)
 
-## GUI tests (rdm-gui/src/) — 19 tests
+## GUI tests (rdm-gui/src/) — 104 tests
+- app.rs: 3 (transparent clear colour for the transparent viewports; the tray hide path
+  never blanks **or minimizes** the window — source guard against `ViewportCommand::Visible(false)`
+  and `ViewportCommand::Minimized(true)`; the repaint heartbeat is short enough to feel instant,
+  and slow enough in the tray to sit well inside the liveness window)
 - backend.rs: 10
 - logging.rs: 2
-- settings.rs: 4
-- util.rs: 3
+- settings.rs: 9 (4 + 5 for the path work: five save/load cycles of `C:\download\rdm`,
+  a legacy doubled value preserved with no further growth, the new switches'
+  defaults/parsing, `--data-dir` precedence)
+- util.rs: 4 (3 + dropped files/links → `DropReport`)
+- platform.rs: 10 (import bus, drop interpretation: text, uri-list, `.url`/`.txt` files,
+  non-links never silent)
+- clipboard.rs: 2 (what counts as a link / what does not)
+- dropzone.rs: 3 (target geometry, one-shot ✕/activation flags, uri-list from dropped paths)
+- icon.rs: 2 (the embedded 64×64 RGBA buffer is complete and not transparent; window icon size)
+- windows.rs: 4 (the work-area anchor is either absent or on screen; an unknown window handle
+  is a refusal, not a guess; **hiding never minimizes** — no `SW_MINIMIZE` anywhere, comments
+  stripped; only the main window’s title wins the fallback search, never `rdm — Settings`/`Help`/
+  the drop target)
+- frames.rs: 2 (a fresh frame is never stale, an old one is; the liveness window is
+  comfortably longer than both heartbeats — 250 ms on screen, 1 s in the tray)
+- tray.rs: 5 (every menu id maps to its command and nothing else does; only `Show` /
+  `New download` need the window — the list is a contract; the inbox keeps order and is
+  handed over exactly once; the Quit deadline outlives the graceful shutdown and stays
+  inside what a user will wait; the drop-target item says its state in words, no ✓ glyph)
+- logging.rs: 4 (level splitting, buffer order/drain, every line also lands in the log file,
+  a missing data directory disables the file without failing)
+- theme/tokens.rs: 5 (state/chunk/log coverage, state distinguishability, zebra tint, breakpoints)
+- theme/contrast.rs: 5 (WCAG maths, contract in both themes, worst-pair margin, focus ring, name resolution)
+- theme/icons.rs: 3 (drawn glyph geometry: closed shapes, stroke inside the rect, state mapping)
+- theme/mod.rs: 5 (design guards: no colour literals in views, every view uses `theme::`,
+  sidebar cap, theme reversibility, and the control-height contract — button, icon button,
+  text input, combo box and labelled button all measure `Spacing::control_height` (24 pt))
+- theme/components.rs: 2 (row-background precedence, banner severities)
+- views/download_list.rs: 4 (responsive column fitting, optional-column drop order, width invariant)
+- views/help_overlay.rs: 2 (the help window closes through one flag; its sections stay in sync
+  with the glossary)
+- views/settings_view.rs: 6 (the window's tabs keep their state across frames, the save/reload
+  footer reports what changed, the folder pickers match the text inputs)
+- ux.rs: 14 (UX policy: confirmation scope and consequence copy, safe-option naming, bulk
+  count/zero-case copy, drop-all threshold, resume-all outcome naming failed downloads,
+  state legend completeness, help sections — now four, including the desktop-integration
+  section — Failed/Completed never offer Resume, remove-while-running explanation,
+  jargon-free copy, glossary synonyms, the doubled-separator hint for legacy values —
+  which must never fire for a UNC share or an extended-length path)
+- backend.rs: 10
+- logging.rs: 2
+- settings.rs: 9 (4 + 5 for the path work: five save/load cycles of `C:\download\rdm`,
+  a legacy doubled value preserved with no further growth, the new switches'
+  defaults/parsing, `--data-dir` precedence)
+- util.rs: 4 (3 + dropped files/links → `DropReport`)
+- platform.rs: 10 (import bus, drop interpretation: text, uri-list, `.url`/`.txt` files,
+  non-links never silent)
+- clipboard.rs: 2 (what counts as a link / what does not)
+- dropzone.rs: 3 (target geometry, one-shot ✕/activation flags, uri-list from dropped paths)
+- icon.rs: 2 (the embedded 64×64 RGBA buffer is complete and not transparent; window icon size)
+- windows.rs: 1 (the work-area anchor is either absent or on screen)
+- theme/tokens.rs: 5 (state/chunk/log coverage, state distinguishability, zebra tint, breakpoints)
+- theme/contrast.rs: 5 (WCAG maths, contract in both themes, worst-pair margin, focus ring, name resolution)
+- theme/mod.rs: 4 (design guards: no colour literals in views, every view uses `theme::`, sidebar cap, theme reversibility)
+- theme/components.rs: 2 (row-background precedence, banner severities)
+- views/download_list.rs: 4 (responsive column fitting, optional-column drop order, width invariant)
+- ux.rs: 14 (UX policy: confirmation scope and consequence copy, safe-option naming, bulk
+  count/zero-case copy, drop-all threshold, resume-all outcome naming failed downloads,
+  state legend completeness, help sections — now four, including the desktop-integration
+  section — Failed/Completed never offer Resume, remove-while-running explanation,
+  jargon-free copy, glossary synonyms, the doubled-separator hint for legacy values —
+  which must never fire for a UNC share or an extended-length path)
+
+Design layer: `rdm-gui/src/theme/` is the single source of truth for colour,
+spacing, radii, typography, sizes and breakpoints; the column-fitting tests
+were extended and are kept green by the same CI job.
+
+UX layer: `rdm-gui/src/ux.rs` is the single source of truth for confirmation
+policy, consequence copy, the state legend, bulk-action microcopy and the
+glossary; `audits/ux-terminology-check.py` enforces the same rules statically
+over CLI help, the GUI strings and the README.
 
 ## CI (after ci/ci-tests.patch)
-- test-linux (cargo test --locked --all-targets)
-- test-windows (cargo test --all-targets)
-- build-gui-linux / build-gui-windows now include `cargo test --release`
+- test-windows (cargo test --all-targets) — the CLI + engine suites
+- build-gui-windows: `cargo build --release`, then `cargo test --release` in `rdm-gui`,
+  then the staged artifact `rdm-gui-windows-x86_64.exe`
+
+Last verified counts, Windows runner: `test-windows` ✓ and `build-gui-windows` ✓ on run
+**37535678990** (`668166d`, 2026-10-07) — the GUI job executed the 104 cases listed above
+(0 failed) and uploaded the binary (5,819,368 bytes). The rounds that led there — the round-3
+heights work (37522424155, `8b03d25`, 99 cases) and the round-4 tray fix (37534564654 →
+37535011455 → 37535678990) — are recorded with their causes in
+`audits/evidence/ux-feature-pack-ci-runs.json`.

@@ -1,0 +1,29 @@
+Compiler diagnostics surfaced by CI run 37344704775 (job build-gui-windows,
+step "Surface compiler errors"), read through the GitHub check-run annotation
+API (workflow annotations are the only CI output channel reachable from the
+sandbox — Actions log blobs are network-blocked there).
+
+All 14 errors of that build (tail of `cargo build --release --message-format=short`,
+ANSI colour codes stripped):
+
+src\views\add_download.rs:6:38: error[E0432]: unresolved import `crate::theme::Level`: no `Level` in `theme`
+src\theme\tokens.rs:30:13: error[E0618]: expected function, found `bool`
+src\views\download_list.rs:73:43: error[E0609]: no field `pad` on type `&Table`: unknown field
+src\views\download_list.rs:73:76: error[E0609]: no field `gap` on type `&Table`: unknown field
+src\views\download_list.rs:88:43: error[E0609]: no field `pad` on type `&Table`: unknown field
+src\views\download_list.rs:88:77: error[E0609]: no field `gap` on type `&Table`: unknown field
+src\views\download_list.rs:108:35: error[E0609]: no field `pad` on type `&Table`: unknown field
+src\views\download_list.rs:108:69: error[E0609]: no field `gap` on type `&Table`: unknown field
+src\views\download_list.rs:155:74: error[E0609]: no field `pad` on type `Table`: unknown field
+src\views\download_list.rs:187:44: error[E0609]: no field `pad` on type `Table`: unknown field
+src\views\download_list.rs:188:48: error[E0609]: no field `pad` on type `Table`: unknown field
+src\views\download_list.rs:279:44: error[E0609]: no field `pad` on type `Table`: unknown field
+src\views\download_list.rs:280:48: error[E0609]: no field `pad` on type `Table`: unknown field
+
+Resolution (commit 9deacbf):
+- `pub use components::Level;` added to `rdm-gui/src/theme/mod.rs`
+- `Tokens::for_dark(dark_mode: bool)` no longer shadows the `dark()` constructor
+- `pad`/`gap` moved from `Spacing` into the `Table` geometry tokens, matching how
+  `views/download_list.rs` consumes them
+
+Verified by CI run 37345251786 (same workflow, green).

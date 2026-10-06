@@ -1,0 +1,27 @@
+rdm — UX terminology & microcopy check
+root: /home/user/rdm
+
+== 1. Preferred terminology ==
+  [ok] no banned terminology in 12 user-facing files
+
+== 2. Destructive actions: confirmation + consequence copy ==
+  [ok] Remove download: confirmed in rdm-gui/src/app.rs::confirm_dialog
+  [ok] Remove completed: confirmed in rdm-gui/src/app.rs::remove_completed_now
+  [ok] Restart from scratch: confirmed in rdm-gui/src/app.rs::restart_now
+  [ok] Drop one queued download: no confirmation required (nothing is discarded yet)
+  [ok] Drop all queued downloads: no confirmation required (nothing is discarded yet)
+  [ok] the remove copy names the action
+  [ok] the remove copy says what is discarded
+  [ok] destructive copy states the undo status
+  [ok] the remove copy explains the file checkbox
+  [ok] the restart copy says the progress is discarded
+  [ok] the bulk remove asks first
+  [ok] the restart asks first
+  [ok] one switch governs the confirmations
+
+== 3. Cross-surface consistency (CLI talk == GUI talk == README) ==
+  [ok] CLI help/README must describe removal as removing a download, not a record
+  [ok] preferred term 'Download' present in ['README.md', 'src/cli/commands.rs']
+  [ok] preferred term 'downloads' present in ['README.md', 'src/cli/commands.rs']
+
+RESULT: PASS — terminology and microcopy rules hold

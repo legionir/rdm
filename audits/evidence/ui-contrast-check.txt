@@ -1,0 +1,17 @@
+rdm — UI design-token verification (static)
+source: rdm-gui/src/theme/tokens.rs
+contract: 8 roles × surfaces, 8 surfaces, 2 themes
+
+== 1/2. WCAG contrast contract ==
+  [ok] dark: worst text pair danger #FF8A8A on surface_hover = 5.01:1 (AA min 4.5:1)
+  [ok] light: worst text pair danger #B91C1C on surface_hover = 5.18:1 (AA min 4.5:1)
+  [ok] dark: focus ring visible on all 8 surfaces
+  [ok] light: focus ring visible on all 8 surfaces
+
+== 3/4. Token discipline in the views ==
+  [ok] 9 UI files: no colour literals, all use `theme::`
+
+== 5. Static sanity of the changed Rust files ==
+  [ok] 21 Rust files: delimiters balanced
+
+RESULT: PASS — all checks green

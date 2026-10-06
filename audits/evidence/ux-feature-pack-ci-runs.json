@@ -1,0 +1,228 @@
+{
+  "increment": "desktop integration + reported defects (UX increment 2)",
+  "branch": "arena/01a10cef-rdm",
+  "ci": [
+    {
+      "run": 37361180868,
+      "sha": "472414b",
+      "event": "push",
+      "conclusion": "failure",
+      "cause": "code",
+      "detail": "first compile round: egui::viewport::UserAttentionType path, Option<&str> mismatches in dropzone/util, Response::strong() on settings_view"
+    },
+    {
+      "run": 37361634987,
+      "sha": "9080ba1",
+      "event": "push",
+      "conclusion": "failure",
+      "cause": "code",
+      "detail": "second round: DroppedFile::name is String, Response has no bold()"
+    },
+    {
+      "run": 37362408563,
+      "sha": "f7dfa04",
+      "event": "push",
+      "conclusion": "failure",
+      "cause": "code",
+      "detail": "third round: ux.rs test array mixed &str with String (test target)"
+    },
+    {
+      "run": 37362918254,
+      "sha": "eeb9880",
+      "event": "push",
+      "conclusion": "infrastructure",
+      "cause": "infrastructure",
+      "detail": "job never started: 'The job was not acquired by Runner of type hosted even after multiple attempts' (test-windows job passed)"
+    },
+    {
+      "run": 37364680078,
+      "sha": "3e0cbfb",
+      "event": "push",
+      "conclusion": "infrastructure",
+      "cause": "infrastructure",
+      "detail": "build-gui-windows cancelled for the same reason; the pull_request run 37364684573 for the same SHA failed identically"
+    },
+    {
+      "run": 37366518834,
+      "sha": "cf7c211",
+      "event": "push",
+      "conclusion": "failure",
+      "cause": "code",
+      "detail": "library + assets + build script compiled (feature pack complete); test target failed: util.rs defined `mod tests` twice \u2014 fixed in 680d5f3"
+    },
+    {
+      "run": 37368129718,
+      "sha": "680d5f3",
+      "event": "push",
+      "conclusion": "infrastructure",
+      "cause": "infrastructure",
+      "detail": "build-gui-windows never acquired a hosted runner (no step ran); test-windows passed"
+    },
+    {
+      "run": 37368133806,
+      "sha": "680d5f3",
+      "event": "pull_request",
+      "conclusion": "infrastructure",
+      "cause": "infrastructure",
+      "detail": "same SHA, same runner-acquisition failure"
+    }
+  ],
+  "audits": {
+    "ui-contrast-check": "PASS (27 Rust files)",
+    "ux-terminology-check": "PASS (15 user-facing files)"
+  },
+  "local_toolchain": "none available in this environment; Rust compile/tests are verified through the CI job only",
+  "not_verified_here": [
+    "tray icon appearance and menu behaviour while the window is hidden",
+    "drag-and-drop from a real browser onto the floating target",
+    "anchor above the taskbar clock at 100/125/150% DPI and with the taskbar on any edge",
+    "the Windows clipboard path end to end",
+    "the icon Explorer shows for the built exe",
+    "absence of a console window for the shipped exe"
+  ],
+  "escalation": "UX-ESC-005 (P1, owner QA)",
+  "note_ph6_baseline": "when a runner is available the GUI job takes ~2m15s (run 37358775197), so queue starvation \u2014 not build time \u2014 is the blocker",
+  "pending": "none for the code at b478f4b; documentation commits after it are docs-only",
+  "green": {
+    "run": 37369744644,
+    "sha": "b478f4b",
+    "event": "push",
+    "conclusion": "success",
+    "jobs": {
+      "build-gui-windows": {
+        "id": 111963645839,
+        "steps": [
+          "Build GUI binary success",
+          "Surface compiler errors skipped (no errors)",
+          "Test GUI crate success (75 unit tests)",
+          "Surface test failures skipped (none)",
+          "Stage GUI binary success",
+          "Upload GUI artifact success"
+        ]
+      },
+      "test-windows": {
+        "id": 111963646178,
+        "conclusion": "success"
+      }
+    },
+    "note": "the pull_request duplicate for the same sha (37369748949) stayed queued and never got a runner"
+  },
+  "green_final": {
+    "run": 37374029321,
+    "sha": "9dad002",
+    "event": "push",
+    "conclusion": "success",
+    "jobs": {
+      "build-gui-windows": {
+        "id": 111977932415,
+        "steps": [
+          "Build GUI binary success",
+          "Surface compiler errors skipped (no errors)",
+          "Test GUI crate success (77 unit tests)",
+          "Surface test failures skipped (none)",
+          "Stage GUI binary success",
+          "Upload GUI artifact success"
+        ]
+      },
+      "test-windows": {
+        "id": 111977932810,
+        "conclusion": "success"
+      }
+    },
+    "note": "artifact rdm-gui-windows-x86_64.exe (icon embedded) can be downloaded from this run for the QA smoke test"
+  },
+  "green_intermediate": {
+    "run": 37370758163,
+    "sha": "9dcadd8",
+    "event": "pull_request",
+    "conclusion": "success",
+    "note": "the queued pull_request duplicate from the previous turn completed green"
+  },
+  "verification_round_2026_10_06": {
+    "bug_a": "settings.rs: escape() no longer escapes backslashes; 5-round round-trip test (windows_paths_survive_any_number_of_round_trips) + legacy test (a_legacy_doubled_path_is_preserved_and_no_longer_grows); legacy values are preserved and explained in Settings rather than silently rewritten (ux::doubled_separator_hint, never fires for UNC/extended paths)",
+    "bug_b": "main.rs:13 windows_subsystem=windows; util.rs:96-99 CREATE_NO_WINDOW on the only Command::new in rdm-gui",
+    "claim_corrected": "an earlier draft/report claimed the loader decoded a legacy doubled backslash; the code preserves it. Report corrected and the real behaviour pinned by a test."
+  },
+  "round_3_2026_10_06": {
+    "trigger": "product-owner report with three screenshots: tray freeze, unequal control heights, Settings/Help as real windows, floating target as a logo-only circle",
+    "rounds": [
+      {
+        "sha": "8ce675d",
+        "runs": [37520509055, 37520515850],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "first compile of the tray fix: windows-sys 0.52 declares `pub type HWND = isize`, not a pointer (13 E0308 casts), and `deliver(cmd, &inbox, &menu_wake)` does not coerce `&Arc<Wake>` to `&Wake` (2 E0277)"
+      },
+      {
+        "sha": "8ed54d1",
+        "runs": [37521061557, 37521068081],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "build green (the whole tray fix compiles); the only failure is theme::tests::every_control_in_a_row_is_control_height_tall — 98 passed / 1 failed"
+      },
+      {
+        "sha": "e413514",
+        "runs": [37521816137, 37521825816],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "same test, now readable in the annotation: 'assertion: text input is 16.00 pt, expected the shared control height 24.00 pt — measured: button 24.00 pt, icon button 24.00 pt, text input 16.00 pt, combo box 24.00 pt, labelled button 24.00 pt'"
+      }
+    ],
+    "green": {
+      "sha": "8b03d25",
+      "runs": [37522424155, 37522433273],
+      "events": {"37522424155": "push", "37522433273": "pull_request"},
+      "conclusion": "success",
+      "jobs": {"test-windows": "success", "build-gui-windows": "success"},
+      "artifact": {"name": "rdm-gui-windows-x86_64.exe", "size_in_bytes": 5808400},
+      "note": "the GUI job builds the release binary, runs `cargo test --release` (the 99 on-disk cases, 0 failed) and uploads the staged exe — that artefact is the hand-off for the desktop smoke test"
+    },
+    "tests_added": {
+      "rdm-gui/src/frames.rs": 2,
+      "rdm-gui/src/tray.rs": 4,
+      "rdm-gui/src/app.rs": 3,
+      "rdm-gui/src/windows.rs": "1 -> 2"
+    },
+    "root_cause": "hiding with `ViewportCommand::Visible(false)` clears WS_VISIBLE; Windows sends no WM_PAINT to an invisible window, eframe paints only on RedrawRequested, and tray commands were read inside App::update — so after the hide no frame ever ran again (minimizing is no escape: nothing visible, nothing painted)",
+    "fix": "layered hide that keeps WS_VISIBLE (windows::hide_main_window / reveal_main_window), tray commands received on two blocking relay threads and applied from a queue, an OS-level reveal for window commands or when frames::is_stale(), and a transparent clear colour for the transparent viewports",
+    "height_contract": "button / icon button / text input / combo box / labelled button = 24.00 pt (Spacing::control_height); `TextEdit` shrinks its reply to the inner rect, so the test measures the rect the control occupies (egui 0.29 text_edit/builder.rs:416)",
+    "not_run": "tray round trip and a real drag-and-drop on a Windows desktop -> UX-ESC-005 (QA); the CI artefact is the hand-off"
+  },
+  "round_4_2026_10_07": {
+    "trigger": "product owner re-reported the identical freeze after df2a4eb (green CI): “no tray menu item works, the app looks hung, it has to be ended from the Task Manager”",
+    "why_the_first_fix_failed": "`windows::hide_main_window` kept WS_VISIBLE but called SW_MINIMIZE to give the keyboard back; a minimized window has nothing on screen to paint, so WM_PAINT and App::update stop — and the relay threads only *queued* the commands that App::update would have applied. The menu still opened because the OS draws it on the app's message pump.",
+    "rounds": [
+      {
+        "sha": "df2a4eb",
+        "runs": [37534564654, 37534555585],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "`SWP_NOZORDER` missing from reveal_main_window’s import list (E0425); `LogControl::log_file` returned Option<Arc<PathBuf>> where Option<&Path> was promised (E0308)"
+      },
+      {
+        "sha": "40939e0",
+        "runs": [37535011455, 37535016088],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "two failing tests: the file append lived in the fmt writer instead of LogBuffer::push (a line pushed by the app never reached the file), and the SW_MINIMIZE guard matched the module’s own prose"
+      }
+    ],
+    "green": {
+      "sha": "668166d",
+      "runs": [37535678990, 37535686161],
+      "events": {"37535678990": "push", "37535686161": "pull_request"},
+      "conclusion": "success",
+      "jobs": {"test-windows": "success", "build-gui-windows": "success"},
+      "artifact": {"name": "rdm-gui-windows-x86_64.exe", "size_in_bytes": 5819368},
+      "tests": 104
+    },
+    "fix": [
+      "hide_main_window: alpha 0 + click-through + tool-window + WS_EX_NOACTIVATE + bottom of the z-order; never SW_MINIMIZE, never clear WS_VISIBLE; the extended style is restored if SetLayeredWindowAttributes refuses",
+      "the tray relays act: Show/New download reveal through the OS from the relay thread; state-dependent commands are rescued with a reveal when frames::is_stale(); Quit reveals and arms FORCE_QUIT_MS = 8000 (the graceful shutdown is capped at 5000), after which the process ends itself and logs why",
+      "the window handle is captured twice (CreationContext, then the first frame) and otherwise searched for among this process's own unowned top-level windows by title rank (RDM = 2, rdm — … = 0), validated with IsWindow before every use",
+      "hidden-window heartbeat 1 s (was 250 ms) and frames::STALE_MS 2 s (was 1 s), so a healthy hidden app is never rescued as if it were dead",
+      "every captured line is appended to rdm-gui.log in the data directory, one line per open; the relays log each command and whether they armed; the hide decision logs its result"
+    ],
+    "not_run": "the tray round trip on a real Windows desktop; rdm-gui.log from that session is the evidence to return -> UX-ESC-005"
+  }
+}

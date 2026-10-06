@@ -84,11 +84,19 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 /// Open a file manager / file at `path` using the platform's default handler.
+///
+/// The child is spawned with `CREATE_NO_WINDOW` on Windows. The app itself runs
+/// in the Windows subsystem (no console — see `main.rs`), so a spawned console
+/// child would otherwise open its own console window — exactly the “extra
+/// terminal that closes the app with it” the UI must never show.
 pub fn open_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
     let mut cmd = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut c = std::process::Command::new("explorer");
         c.arg(path);
+        c.creation_flags(CREATE_NO_WINDOW);
         c
     };
     #[cfg(target_os = "macos")]
@@ -104,6 +112,32 @@ pub fn open_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
         c
     };
     cmd.spawn().map(|_| ())
+}
+
+/// The links a set of dropped payloads contains, in drop order.
+///
+/// Kept here rather than in the views so the rule (“a drop is a link, or a file
+/// that holds one”) is testable without constructing egui input.
+pub fn dropped_links(
+    dropped: &[egui::DroppedFile],
+) -> Vec<crate::platform::DropReport> {
+    dropped
+        .iter()
+        .map(|file| {
+            let text = Some(
+                file.path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .or_else(|| (!file.name.is_empty()).then(|| file.name.clone()))
+                    .unwrap_or_default(),
+            );
+            let uri = file
+                .path
+                .as_ref()
+                .map(|p| format!("file://{}", p.display()));
+            crate::platform::interpret_drop(text.as_deref(), uri.as_deref())
+        })
+        .collect()
 }
 
 /// Interpret a text-field value as an existing directory, if it is one.
@@ -135,6 +169,28 @@ pub fn pick_folder(start: Option<&std::path::Path>, title: &str) -> Option<PathB
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dropped_link_becomes_a_report_and_junk_does_not() {
+        let dropped = vec![
+            egui::DroppedFile {
+                path: Some(PathBuf::from("/tmp/does-not-exist-rdm-test.txt")),
+                ..Default::default()
+            },
+            egui::DroppedFile {
+                name: "https://example.com/dropped.bin".to_string(),
+                ..Default::default()
+            },
+        ];
+        let reports = dropped_links(&dropped);
+        assert_eq!(reports.len(), 2);
+        assert!(reports[0].url.is_none(), "missing file is not a link");
+        assert!(!reports[0].note.is_empty());
+        assert_eq!(
+            reports[1].url.as_deref(),
+            Some("https://example.com/dropped.bin")
+        );
+    }
 
     #[test]
     fn formats_epoch_milliseconds() {

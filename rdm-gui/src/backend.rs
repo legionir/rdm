@@ -355,7 +355,7 @@ impl Backend {
                 .update_state(row.id, DownloadState::Cancelled, None)?;
             self.storage.log_event(row.id, "warn", "cancel requested")?;
             Ok(format!(
-                "cancel requested for {} ({}) — chunk data retained",
+                "Cancel requested for {} ({}) — the partial data is kept, so Resume can continue it.",
                 row.public_id, row.filename
             ))
         } else if row.state.resumable() || row.state == DownloadState::Cancelled {
@@ -363,12 +363,12 @@ impl Backend {
                 .update_state(row.id, DownloadState::Cancelled, None)?;
             self.storage.log_event(row.id, "warn", "download cancelled")?;
             Ok(format!(
-                "download {} cancelled — use Remove ▸ purge to delete its files",
+                "Download {} cancelled — its partial data is kept; Remove discards it.",
                 row.public_id
             ))
         } else {
             bail!(
-                "download {} is {} and cannot be cancelled",
+                "download {} is {} — there is nothing to cancel",
                 row.public_id,
                 row.state
             )
@@ -380,7 +380,7 @@ impl Backend {
         let row = self.require(id)?;
         if row.state.active() {
             bail!(
-                "download {} is still running; cancel it first",
+                "download {} is still running — pause or cancel it first",
                 row.public_id
             );
         }
@@ -388,15 +388,25 @@ impl Backend {
             let _ = std::fs::remove_file(&row.output_path);
             let _ = std::fs::remove_file(sidecar_path(Path::new(&row.output_path)));
         }
+        // Distinguish “removed” from “removed, but the file had already gone”
+        // (or could not be deleted): a silent `let _ =` would report a deletion
+        // that did not happen.
+        let file_gone = row.output_path.is_empty()
+            || !Path::new(&row.output_path).exists();
         if !row.chunk_dir.is_empty() {
             let _ = std::fs::remove_dir_all(&row.chunk_dir);
         }
         self.storage.delete_download(row.id)?;
         Ok(format!(
-            "removed download {} ({}){}",
+            "Removed {} ({}){}{}",
             row.public_id,
             row.filename,
-            if purge { " and its files" } else { "" }
+            if purge { " and deleted its finished file(s)" } else { "" },
+            if purge && file_gone {
+                " — the file was already gone"
+            } else {
+                ""
+            }
         ))
     }
 
@@ -416,13 +426,17 @@ impl Backend {
 
     /// Bulk helper: resume everything that is paused/interrupted/failed.
     pub fn resume_all(&self, defaults: &StartRequest, max_concurrent: usize) -> Result<usize> {
+        // Only the states `resume()` accepts are continued here: it rejects
+        // terminal states (`Failed` needs `restart`), so including them would
+        // abort the whole bulk action on the first failed download and leave
+        // the remaining ones untouched (UX finding FIND-UX-004).
         let mut n = 0;
         for row in self.list()? {
-            let restartable = matches!(
+            let continuable = matches!(
                 row.state,
-                DownloadState::Paused | DownloadState::Interrupted | DownloadState::Failed
+                DownloadState::Paused | DownloadState::Interrupted | DownloadState::Cancelled
             );
-            if restartable {
+            if continuable {
                 self.resume(row.id, defaults, max_concurrent)?;
                 n += 1;
             }

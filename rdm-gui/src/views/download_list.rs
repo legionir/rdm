@@ -1,44 +1,19 @@
 //! The download table (`rdm list` with buttons).
 //!
 //! Rows are full-width: clicking anywhere on a row selects it and
-//! double-clicking opens the details modal.
+//! double-clicking opens the details modal. Every colour, size and spacing
+//! comes from the design tokens — the responsive column arithmetic is the only
+//! layout logic that lives here, and it is unit-tested.
 
-use egui::{Align, Color32, Layout, RichText, Sense, Ui, UiBuilder};
+use egui::{Align, Layout, RichText, Sense, Ui, UiBuilder};
 use rdm::models::{DownloadRecord, DownloadState};
 use rdm::utils::human;
 
 use crate::state::{progress_of, GuiState, UiAction};
+use crate::theme::{self, components, Palette, Radii, Sizes, Spacing, Table};
 use crate::util;
+use crate::ux;
 
-pub fn state_color(ui: &Ui, state: DownloadState) -> Color32 {
-    match state {
-        DownloadState::Completed => Color32::from_rgb(22, 163, 74),
-        DownloadState::Running => Color32::from_rgb(37, 99, 235),
-        DownloadState::Merging => Color32::from_rgb(139, 92, 246),
-        DownloadState::Queued => Color32::from_rgb(217, 119, 6),
-        DownloadState::Paused => ui.visuals().weak_text_color(),
-        DownloadState::Interrupted => Color32::from_rgb(234, 88, 12),
-        DownloadState::Failed => Color32::from_rgb(220, 38, 38),
-        DownloadState::Cancelled => ui.visuals().weak_text_color(),
-    }
-}
-
-pub fn state_glyph(state: DownloadState) -> &'static str {
-    match state {
-        DownloadState::Completed => "✔",
-        DownloadState::Running => "▶",
-        DownloadState::Merging => "⛃",
-        DownloadState::Queued => "…",
-        DownloadState::Paused => "⏸",
-        DownloadState::Interrupted => "⚠",
-        DownloadState::Failed => "✖",
-        DownloadState::Cancelled => "⃠",
-    }
-}
-
-/// Horizontal padding inside a row, and the gap between two columns.
-const PAD: f32 = 8.0;
-const GAP: f32 = 8.0;
 /// Column widths adapt to the available width; `FILE` is the flexible one.
 pub struct Columns {
     pub state: f32,
@@ -57,24 +32,35 @@ pub struct Columns {
 }
 
 impl Columns {
-    fn for_width(width: f32) -> Self {
+    /// Fit the columns into `width`.
+    ///
+    /// Drop order for the optional columns is ADDED, SPEED, ETA; then the
+    /// progress bar gets narrow, and finally the fixed columns are scaled down
+    /// proportionally (never below a quarter of their design width) so the row
+    /// never grows wider than the panel. FILE keeps at least `file_min`.
+    fn for_tokens(width: f32, t: &Table) -> Self {
         let mut c = Columns {
-            state: 82.0,
-            file: 140.0,
-            id: 84.0,
-            conns: 78.0,
-            added: 86.0,
-            progress: 150.0,
-            size: 106.0,
-            speed: 72.0,
-            eta: 58.0,
-            actions: 158.0,
+            state: t.state,
+            file: t.file_ideal,
+            id: t.id,
+            conns: t.conns,
+            added: t.added,
+            progress: t.progress,
+            size: t.size,
+            speed: t.speed,
+            eta: t.eta,
+            actions: t.actions,
             show_added: true,
             show_speed: true,
             show_eta: true,
         };
         let fixed = |c: &Columns| {
-            c.state + c.id + c.conns + c.progress + c.size + c.actions
+            c.state
+                + c.id
+                + c.conns
+                + c.progress
+                + c.size
+                + c.actions
                 + if c.show_added { c.added } else { 0.0 }
                 + if c.show_speed { c.speed } else { 0.0 }
                 + if c.show_eta { c.eta } else { 0.0 }
@@ -84,7 +70,8 @@ impl Columns {
         let cols = |c: &Columns| {
             7 + (c.show_added as usize) + (c.show_speed as usize) + (c.show_eta as usize)
         };
-        let budget = |c: &Columns| width - 2.0 * PAD - (cols(c) as f32 - 1.0) * GAP - 140.0;
+        let budget =
+            |c: &Columns| width - 2.0 * t.pad - (cols(c) as f32 - 1.0) * t.gap - t.file_ideal;
         if budget(&c) < fixed(&c) {
             c.show_added = false;
         }
@@ -95,11 +82,11 @@ impl Columns {
             c.show_eta = false;
         }
         if budget(&c) < fixed(&c) {
-            c.progress = 90.0;
+            c.progress = t.progress_compact;
         }
         // Still too narrow? Scale the fixed columns down proportionally so the
-        // row never grows wider than the panel (FILE keeps at least 80 px).
-        let avail_fixed = width - 2.0 * PAD - (cols(&c) as f32 - 1.0) * GAP - 80.0;
+        // row never grows wider than the panel (FILE keeps its minimum).
+        let avail_fixed = width - 2.0 * t.pad - (cols(&c) as f32 - 1.0) * t.gap - t.file_min;
         let needed = fixed(&c);
         if avail_fixed < needed && needed > 0.0 {
             let scale = (avail_fixed / needed).clamp(0.25, 1.0);
@@ -119,35 +106,61 @@ impl Columns {
                 c.eta *= scale;
             }
         }
-        c.file = (width - 2.0 * PAD - (cols(&c) as f32 - 1.0) * GAP - fixed(&c)).max(80.0);
+        c.file = (width - 2.0 * t.pad - (cols(&c) as f32 - 1.0) * t.gap - fixed(&c)).max(t.file_min);
         c
     }
 }
 
+/// Columns are laid out back-to-front so a resize never overflows the panel.
+/// Used by the unit tests; the runtime code relies on `for_tokens` itself.
+#[cfg(test)]
+fn columns_width(c: &Columns, t: &Table) -> f32 {
+    2.0 * t.pad
+        + 6.0 * t.gap
+        + c.file
+        + c.state
+        + c.id
+        + c.conns
+        + c.progress
+        + c.size
+        + c.actions
+        + if c.show_added { c.added + t.gap } else { 0.0 }
+        + if c.show_speed { c.speed + t.gap } else { 0.0 }
+        + if c.show_eta { c.eta + t.gap } else { 0.0 }
+}
+
 pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
     let mut actions = Vec::new();
+    let palette = theme::palette_of(ui);
     let selected = state.selected;
     let rows: Vec<DownloadRecord> = state.visible_rows().into_iter().cloned().collect();
     let rates: Vec<f64> = rows.iter().map(|r| state.rate_of(r.id)).collect();
 
     if rows.is_empty() {
+        let spacing = Spacing::default();
         ui.vertical_centered(|ui| {
-            ui.add_space(24.0);
-            ui.label(
-                RichText::new("No downloads match. Press “New download” to add one.")
-                    .italics()
-                    .color(ui.visuals().weak_text_color()),
+            ui.add_space(spacing.xxl);
+            components::hint(
+                ui,
+                &palette,
+                "Nothing here yet — press “New download” and paste a URL to start your first \
+                 download. Press F1 for what the states mean.",
             );
-            ui.add_space(24.0);
+            ui.add_space(spacing.xxl);
         });
         return actions;
     }
+
+    // One geometry per frame: the header and every row share it, so a resize
+    // can never make a row drop a column the header still shows.
+    let table = Sizes::default().table;
+    let columns = Columns::for_tokens(ui.available_width() - 2.0 * table.pad, &table);
 
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .id_salt("downloads-scroll")
         .show(ui, |ui| {
-            header(ui);
+            header(ui, &palette, &columns);
             for (idx, (record, rate)) in rows.iter().zip(rates.iter()).enumerate() {
                 row(
                     ui,
@@ -155,6 +168,8 @@ pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
                     record,
                     *rate,
                     selected == Some(record.id),
+                    &palette,
+                    &columns,
                     &mut actions,
                 );
             }
@@ -163,12 +178,16 @@ pub fn show(ui: &mut Ui, state: &mut GuiState) -> Vec<UiAction> {
     actions
 }
 
-fn header(ui: &mut Ui) {
+fn header(ui: &mut Ui, palette: &Palette, cols: &Columns) {
+    let table = Sizes::default().table;
     let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 24.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(width, table.header_height),
+        Sense::hover(),
+    );
     let inner = egui::Rect::from_min_max(
-        rect.left_top() + egui::vec2(PAD, 2.0),
-        rect.right_bottom() - egui::vec2(PAD, 2.0),
+        rect.left_top() + egui::vec2(table.pad, table.header_inset),
+        rect.right_bottom() - egui::vec2(table.pad, table.header_inset),
     );
     let mut head = ui.new_child(
         UiBuilder::new()
@@ -176,10 +195,8 @@ fn header(ui: &mut Ui) {
             .max_rect(inner)
             .layout(Layout::left_to_right(Align::Center)),
     );
-    let cols = Columns::for_width(head.available_width());
-    let weak = head.visuals().weak_text_color();
     let text = |ui: &mut Ui, label: &str| {
-        ui.label(RichText::new(label).small().strong().color(weak));
+        ui.label(RichText::new(label).small().strong().color(palette.text_muted));
     };
     cell(&mut head, cols.state, "h-state", |ui| text(ui, "STATE"));
     cell(&mut head, cols.file, "h-file", |ui| text(ui, "FILE"));
@@ -188,7 +205,9 @@ fn header(ui: &mut Ui) {
     if cols.show_added {
         cell(&mut head, cols.added, "h-added", |ui| text(ui, "ADDED"));
     }
-    cell(&mut head, cols.progress, "h-progress", |ui| text(ui, "PROGRESS"));
+    cell(&mut head, cols.progress, "h-progress", |ui| {
+        text(ui, "PROGRESS")
+    });
     cell(&mut head, cols.size, "h-size", |ui| text(ui, "SIZE"));
     if cols.show_speed {
         cell(&mut head, cols.speed, "h-speed", |ui| text(ui, "SPEED"));
@@ -196,10 +215,12 @@ fn header(ui: &mut Ui) {
     if cols.show_eta {
         cell(&mut head, cols.eta, "h-eta", |ui| text(ui, "ETA"));
     }
-    cell(&mut head, cols.actions, "h-actions", |ui| text(ui, "ACTIONS"));
+    cell(&mut head, cols.actions, "h-actions", |ui| {
+        text(ui, "ACTIONS")
+    });
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        ui.visuals().widgets.noninteractive.bg_stroke,
+        egui::Stroke::new(1.0_f32, palette.border_subtle),
     );
 }
 
@@ -224,46 +245,41 @@ fn row(
     record: &DownloadRecord,
     rate: f64,
     is_selected: bool,
+    palette: &Palette,
+    cols: &Columns,
     actions: &mut Vec<UiAction>,
 ) {
-    let height = 42.0;
-    let (rect, response) = ui
-        .allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::click());
+    let spacing = Spacing::default();
+    let sizes = Sizes::default();
+    let table = sizes.table;
+    let radii = Radii::default();
+
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), spacing.row_height),
+        Sense::click(),
+    );
     let response = response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(format!("{}\n{}", record.url, record.output_path));
 
-    // Row background: selection > hover > zebra stripes.
-    let visuals = ui.visuals();
-    let bg = if is_selected {
-        Some(visuals.selection.bg_fill)
-    } else if response.hovered() {
-        Some(visuals.widgets.hovered.bg_fill)
-    } else if idx % 2 == 1 {
-        Some(if visuals.dark_mode {
-            Color32::from_white_alpha(10)
-        } else {
-            Color32::from_black_alpha(8)
-        })
-    } else {
-        None
-    };
-    if let Some(bg) = bg {
-        ui.painter()
-            .rect_filled(rect, egui::Rounding::same(4.0), bg);
+    // Row background: selected > hovered > zebra stripes (token precedence).
+    if let Some(bg) = components::row_background(palette, is_selected, response.hovered(), idx % 2 == 1)
+    {
+        ui.painter().rect_filled(rect, egui::Rounding::same(radii.md), bg);
     }
+    // The accent bar is the non-colour-only signal for "selected" (SC 1.4.11).
     if is_selected {
         let accent = egui::Rect::from_min_max(
             rect.left_top(),
-            egui::pos2(rect.left() + 3.0, rect.bottom()),
+            egui::pos2(rect.left() + table.accent, rect.bottom()),
         );
         ui.painter()
-            .rect_filled(accent, egui::Rounding::same(2.0), visuals.selection.stroke.color);
+            .rect_filled(accent, egui::Rounding::same(radii.sm), palette.accent);
     }
 
     let inner = egui::Rect::from_min_max(
-        rect.left_top() + egui::vec2(PAD + 2.0, 3.0),
-        rect.right_bottom() - egui::vec2(PAD, 3.0),
+        rect.left_top() + egui::vec2(table.pad, table.row_inset),
+        rect.right_bottom() - egui::vec2(table.pad, table.row_inset),
     );
     let mut row_ui = ui.new_child(
         UiBuilder::new()
@@ -271,55 +287,41 @@ fn row(
             .max_rect(inner)
             .layout(Layout::left_to_right(Align::Center)),
     );
-    let cols = Columns::for_width(row_ui.available_width());
-    let weak = row_ui.visuals().weak_text_color();
-    let color = state_color(&row_ui, record.state);
 
-    // STATE
+    // STATE — glyph + label + semantic colour on a chip surface; the tooltip
+    // carries the legend definition and the next step for that state.
     cell(&mut row_ui, cols.state, "state", |ui| {
-        ui.add(
-            egui::Label::new(
-                RichText::new(format!("{} {}", state_glyph(record.state), record.state))
-                    .small()
-                    .color(color),
-            )
-            .truncate(),
-        );
+        components::status_chip(ui, palette, record.state)
+            .on_hover_text(ux::legend_for(record.state).hover_text());
     });
 
     // FILE
     cell(&mut row_ui, cols.file, "file", |ui| {
-        ui.add(egui::Label::new(RichText::new(&record.filename).strong()).truncate());
-    });
-
-    // ID
-    cell(&mut row_ui, cols.id, "id", |ui| {
         ui.add(
             egui::Label::new(
-                RichText::new(&record.public_id)
-                    .monospace()
-                    .small()
-                    .color(weak),
+                RichText::new(&record.filename)
+                    .strong()
+                    .color(palette.text_primary),
             )
             .truncate(),
         );
     });
 
+    // ID
+    cell(&mut row_ui, cols.id, "id", |ui| {
+        components::meta(ui, palette, record.public_id.as_str());
+    });
+
     // CONNECTIONS
     cell(&mut row_ui, cols.conns, "conns", |ui| {
-        ui.label(
-            RichText::new(record.max_connections.to_string())
-                .monospace()
-                .small()
-                .color(weak),
-        );
+        components::meta(ui, palette, record.max_connections.to_string());
     });
 
     // ADDED
     if cols.show_added {
         let text = util::format_relative(record.created_at);
         cell(&mut row_ui, cols.added, "added", |ui| {
-            ui.add(egui::Label::new(RichText::new(text).small().color(weak)).truncate());
+            components::meta(ui, palette, text);
         });
     }
 
@@ -328,7 +330,7 @@ fn row(
     cell(&mut row_ui, cols.progress, "progress", |ui| {
         ui.add(
             egui::ProgressBar::new(fraction)
-                .desired_width((cols.progress - 6.0).max(40.0))
+                .desired_width((cols.progress - sizes.progress_inset).max(sizes.progress_min))
                 .text(format!("{:.1}%", fraction * 100.0)),
         );
     });
@@ -347,7 +349,8 @@ fn row(
                     total
                 ))
                 .monospace()
-                .small(),
+                .small()
+                .color(palette.text_primary),
             )
             .truncate(),
         );
@@ -361,7 +364,7 @@ fn row(
             "—".to_string()
         };
         cell(&mut row_ui, cols.speed, "speed", |ui| {
-            ui.label(RichText::new(text).monospace().small());
+            components::meta(ui, palette, text);
         });
     }
 
@@ -375,64 +378,52 @@ fn row(
             _ => "—".to_string(),
         };
         cell(&mut row_ui, cols.eta, "eta", |ui| {
-            ui.label(RichText::new(eta).monospace().small());
+            components::meta(ui, palette, eta);
         });
     }
 
     // ACTIONS
     cell(&mut row_ui, cols.actions, "actions", |ui| {
-        // Icon buttons: a bit tighter than the app-wide paddings so four of
-        // them fit into the column.
-        ui.spacing_mut().button_padding = egui::vec2(7.0, 4.0);
-        ui.spacing_mut().item_spacing.x = 5.0;
+        // Square icon buttons (the shared control height) with a tight gap, so
+        // up to six of them fit into the actions column.
+        ui.spacing_mut().item_spacing.x = spacing.icon_gap;
         let running = record.state.active();
-        let resumable = !running && record.state != DownloadState::Completed;
+        // Resume only where the backend accepts it: `Backend::resume` rejects
+        // terminal states except Cancelled, so a Failed download is offered
+        // Restart instead of a button that could only produce an error.
+        let resumable = !running
+            && !matches!(
+                record.state,
+                DownloadState::Completed | DownloadState::Failed
+            );
 
         if running {
-            if ui
-                .small_button("⏸")
-                .on_hover_text("Pause (rdm pause)")
-                .clicked()
-            {
+            if components::icon_button(ui, crate::theme::Icon::Pause, ux::pause_tooltip()).clicked() {
                 actions.push(UiAction::Pause(record.id));
             }
-            if ui
-                .small_button("⏹")
-                .on_hover_text("Cancel (rdm cancel)")
-                .clicked()
-            {
+            if components::icon_button(ui, crate::theme::Icon::Stop, ux::cancel_tooltip()).clicked() {
                 actions.push(UiAction::Cancel(record.id));
             }
-        } else if resumable {
-            if ui
-                .small_button("▶")
-                .on_hover_text("Resume (rdm resume)")
-                .clicked()
-            {
-                actions.push(UiAction::Resume(record.id));
-            }
+        } else if resumable && components::icon_button(ui, crate::theme::Icon::Play, ux::resume_tooltip()).clicked() {
+            actions.push(UiAction::Resume(record.id));
         }
-        if !running {
-            if ui
-                .small_button("⟲")
-                .on_hover_text("Restart from scratch (rdm download --force)")
-                .clicked()
-            {
-                actions.push(UiAction::Restart(record.id));
-            }
+        if !running
+            && components::icon_button(ui, crate::theme::Icon::Restart, ux::restart_tooltip(record.state)).clicked() {
+            actions.push(UiAction::AskRestart(record.id));
         }
-        if ui
-            .small_button("📂")
-            .on_hover_text("Open the containing folder")
-            .clicked()
-        {
+        if components::icon_button(ui, crate::theme::Icon::Folder, ux::open_folder_tooltip()).clicked() {
             actions.push(UiAction::OpenOutputFolder(record.id));
         }
-        if ui
-            .small_button("🗑")
-            .on_hover_text("Remove record (rdm remove)")
-            .clicked()
-        {
+        if running {
+            // Disabled with an explanation instead of failing in the backend.
+            let disabled = ui.add_enabled(
+                false,
+                egui::Button::new("").min_size(egui::Vec2::splat(
+                    crate::theme::Spacing::default().icon_button_side,
+                )),
+            );
+            disabled.on_disabled_hover_text(ux::remove_tooltip(true));
+        } else if components::icon_button(ui, crate::theme::Icon::Trash, ux::remove_tooltip(false)).clicked() {
             actions.push(UiAction::AskRemove(record.id));
         }
     });
@@ -450,35 +441,44 @@ fn row(
 mod tests {
     use super::*;
 
+    fn for_width(width: f32) -> Columns {
+        Columns::for_tokens(width, &Sizes::default().table)
+    }
+
     #[test]
     fn wide_panels_keep_every_column() {
-        let c = Columns::for_width(1200.0);
+        let c = for_width(1200.0);
         assert!(c.show_added && c.show_speed && c.show_eta);
         assert!(c.file >= 140.0);
     }
 
     #[test]
     fn narrow_panels_drop_optional_columns_before_the_file_name() {
-        let c = Columns::for_width(520.0);
+        let c = for_width(520.0);
         assert!(!c.show_added || !c.show_speed || !c.show_eta);
         assert!(c.file >= 80.0);
     }
 
     #[test]
     fn columns_never_exceed_the_available_width() {
+        let table = Sizes::default().table;
         for width in [300.0, 520.0, 830.0, 1100.0, 1600.0] {
-            let c = Columns::for_width(width);
-            let cols = 7 + (c.show_added as usize) + (c.show_speed as usize) + (c.show_eta as usize);
-            let total = 2.0 * PAD + (cols as f32 - 1.0) * GAP + c.file + c.state + c.id + c.conns
-                + c.progress
-                + c.size
-                + c.actions
-                + if c.show_added { c.added } else { 0.0 }
-                + if c.show_speed { c.speed } else { 0.0 }
-                + if c.show_eta { c.eta } else { 0.0 };
+            let c = for_width(width);
+            let total = columns_width(&c, &table);
             // The row may be a bit narrower than the panel (extra room for the
             // file column), but never wider.
             assert!(total <= width + 0.5, "width {width}: total {total}");
         }
+    }
+
+    #[test]
+    fn optional_columns_are_dropped_in_priority_order() {
+        let table = Sizes::default().table;
+        let wide = Columns::for_tokens(1600.0, &table);
+        assert!(wide.show_added && wide.show_speed && wide.show_eta);
+        let medium = Columns::for_tokens(900.0, &table);
+        assert!(!medium.show_added || !medium.show_speed, "ADDED goes first");
+        let narrow = Columns::for_tokens(560.0, &table);
+        assert!(!narrow.show_eta);
     }
 }

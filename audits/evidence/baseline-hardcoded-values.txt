@@ -1,0 +1,50 @@
+Baseline scan of the rdm GUI at commit f528faf (before the design tokens).
+Reproduce: python3 audits/ui-baseline-report.py
+
+file                                         colour literals  design-value literals
+rdm-gui/src/app.rs                                         1                     18
+rdm-gui/src/state.rs                                       0                      1
+rdm-gui/src/main.rs                                        0                      0
+rdm-gui/src/views/add_download.rs                          1                     12
+rdm-gui/src/views/details_modal.rs                         5                      7
+rdm-gui/src/views/download_list.rs                         8                      4
+rdm-gui/src/views/footer.rs                                6                      5
+rdm-gui/src/views/queue_sidebar.rs                         0                      3
+rdm-gui/src/views/settings_view.rs                         1                     18
+rdm-gui/src/views/toolbar.rs                               1                      4
+
+TOTAL: 23 hardcoded colour constructors, 72 inlined design numbers across 10 UI files.
+
+Colour literals by file (the values the token layer replaced):
+  rdm-gui/src/app.rs: 1
+  rdm-gui/src/views/add_download.rs: 1
+  rdm-gui/src/views/details_modal.rs: 5
+  rdm-gui/src/views/download_list.rs: 8
+  rdm-gui/src/views/footer.rs: 6
+  rdm-gui/src/views/settings_view.rs: 1
+  rdm-gui/src/views/toolbar.rs: 1
+
+file:line evidence:
+  rdm-gui/src/app.rs:372: .button(RichText::new("Remove").color(Color32::from_rgb(220, 38, 38)))
+  rdm-gui/src/views/add_download.rs:126: ui.colored_label(egui::Color32::from_rgb(220, 38, 38), err);
+  rdm-gui/src/views/details_modal.rs:128: .color(Color32::from_rgb(220, 38, 38)),
+  rdm-gui/src/views/details_modal.rs:211: ChunkStatus::Completed => Color32::from_rgb(22, 163, 74),
+  rdm-gui/src/views/details_modal.rs:212: ChunkStatus::Active => Color32::from_rgb(37, 99, 235),
+  rdm-gui/src/views/details_modal.rs:213: ChunkStatus::Failed => Color32::from_rgb(220, 38, 38),
+  rdm-gui/src/views/details_modal.rs:220: .color(Color32::from_rgb(220, 38, 38)),
+  rdm-gui/src/views/download_list.rs:15: DownloadState::Completed => Color32::from_rgb(22, 163, 74),
+  rdm-gui/src/views/download_list.rs:16: DownloadState::Running => Color32::from_rgb(37, 99, 235),
+  rdm-gui/src/views/download_list.rs:17: DownloadState::Merging => Color32::from_rgb(139, 92, 246),
+  rdm-gui/src/views/download_list.rs:18: DownloadState::Queued => Color32::from_rgb(217, 119, 6),
+  rdm-gui/src/views/download_list.rs:20: DownloadState::Interrupted => Color32::from_rgb(234, 88, 12),
+  rdm-gui/src/views/download_list.rs:21: DownloadState::Failed => Color32::from_rgb(220, 38, 38),
+  rdm-gui/src/views/download_list.rs:244: Color32::from_white_alpha(10)
+  rdm-gui/src/views/download_list.rs:246: Color32::from_black_alpha(8)
+  rdm-gui/src/views/footer.rs:34: Color32::from_rgb(220, 38, 38)
+  rdm-gui/src/views/footer.rs:163: "error" => Color32::from_rgb(220, 38, 38),
+  rdm-gui/src/views/footer.rs:164: "warn" => Color32::from_rgb(217, 119, 6),
+  rdm-gui/src/views/footer.rs:198: "error" => Color32::from_rgb(220, 38, 38),
+  rdm-gui/src/views/footer.rs:199: "warn" => Color32::from_rgb(217, 119, 6),
+  rdm-gui/src/views/footer.rs:201: _ => Color32::GRAY,
+  rdm-gui/src/views/settings_view.rs:185: .color(Color32::from_rgb(217, 119, 6)),
+  rdm-gui/src/views/toolbar.rs:58: .color(Color32::from_rgb(217, 119, 6)),

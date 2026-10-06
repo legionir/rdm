@@ -1,13 +1,19 @@
-//! Details modal — opened by double-clicking a row. Hosts the tabs that used
-//! to live in the bottom panel: Overview, Chunks and JSON (`rdm info`).
+//! Details modal — opened by double-clicking a row (or with `Enter`). Hosts
+//! the tabs that used to live in the bottom panel: Overview, Chunks and JSON
+//! (`rdm info`).
+//!
+//! All colours, sizes and spacings come from the design tokens; the chunk
+//! statuses share the same semantic roles as the download states, so a
+//! "Completed" chunk and a "Completed" download are the same green.
 
-use egui::{Color32, Context, RichText, Ui};
-use rdm::models::{ChunkStatus, DownloadRecord};
+use egui::{Context, RichText, Ui};
+use rdm::models::{ChunkRecord, DownloadRecord};
 use rdm::utils::human;
 
 use crate::state::{DetailTab, GuiState, UiAction};
+use crate::theme::{self, components, Palette, Sizes, Spacing};
 use crate::util;
-use crate::views::download_list::{state_color, state_glyph};
+use crate::ux;
 
 pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
     let mut actions = Vec::new();
@@ -20,16 +26,19 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
         return actions;
     };
 
+    let palette = theme::palette_ctx(ctx);
+    let sizes = Sizes::default();
+    let spacing = Spacing::default();
     let mut open = true;
     egui::Window::new(format!("Details — {}", record.filename))
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
-        .default_size([780.0, 540.0])
-        .min_size([500.0, 360.0])
+        .default_size(sizes.details_default)
+        .min_size(sizes.details_min)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
-            ui.add_space(2.0);
+            ui.add_space(spacing.xxs);
             ui.horizontal_wrapped(|ui| {
                 for tab in DetailTab::ALL {
                     if ui
@@ -40,26 +49,30 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
                     }
                 }
                 ui.separator();
-                ui.label(
-                    RichText::new(format!(
-                        "{} {} · {}",
-                        state_glyph(record.state),
-                        record.state,
-                        record.filename
-                    ))
-                    .color(state_color(ui, record.state))
-                    .strong(),
-                );
+                components::state_heading(ui, &palette, record.state)
+                    .on_hover_text(ux::legend_for(record.state).hover_text());
+                components::hint(ui, &palette, format!("· {}", record.filename));
             });
+            // Plain-language meaning and the next step for the current state.
+            components::hint(
+                ui,
+                &palette,
+                format!(
+                    "{} — {}. Next: {}",
+                    record.state,
+                    ux::legend_for(record.state).meaning,
+                    ux::legend_for(record.state).next_step
+                ),
+            );
             ui.separator();
-            ui.add_space(6.0);
+            ui.add_space(spacing.sm);
 
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .id_salt("details-modal-scroll")
                 .show(ui, |ui| match state.detail_tab {
-                    DetailTab::Overview => overview(ui, &record, state, &mut actions),
-                    DetailTab::Chunks => chunks(ui, state),
+                    DetailTab::Overview => overview(ui, &record, state, &palette, &mut actions),
+                    DetailTab::Chunks => chunks(ui, state, &palette),
                     DetailTab::Json => json(ui, state, &mut actions),
                 });
         });
@@ -70,17 +83,28 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
     actions
 }
 
-fn overview(ui: &mut Ui, record: &DownloadRecord, state: &GuiState, actions: &mut Vec<UiAction>) {
-    let weak = ui.visuals().weak_text_color();
+fn overview(
+    ui: &mut Ui,
+    record: &DownloadRecord,
+    state: &GuiState,
+    palette: &Palette,
+    actions: &mut Vec<UiAction>,
+) {
+    let sizes = Sizes::default();
     egui::Grid::new("detail-overview")
         .num_columns(2)
-        .spacing([14.0, 8.0])
-        .min_col_width(130.0)
+        .spacing(sizes.details_grid_spacing)
+        .min_col_width(sizes.details_grid_key_width)
         .striped(true)
         .show(ui, |ui| {
             let field = |ui: &mut Ui, key: &str, value: String| {
-                ui.label(RichText::new(key).small().color(weak));
-                ui.label(RichText::new(value).monospace().small());
+                components::key_label(ui, palette, key);
+                ui.label(
+                    RichText::new(value)
+                        .monospace()
+                        .small()
+                        .color(palette.text_primary),
+                );
                 ui.end_row();
             };
             field(ui, "id", record.public_id.clone());
@@ -93,7 +117,7 @@ fn overview(ui: &mut Ui, record: &DownloadRecord, state: &GuiState, actions: &mu
             }
             field(ui, "file", record.filename.clone());
             field(ui, "output", record.output_path.clone());
-            field(ui, "chunks dir", record.chunk_dir.clone());
+            field(ui, "partial data folder", record.chunk_dir.clone());
             field(
                 ui,
                 "size",
@@ -110,7 +134,15 @@ fn overview(ui: &mut Ui, record: &DownloadRecord, state: &GuiState, actions: &mu
             field(ui, "speed", human::human_rate(state.rate_of(record.id)));
             field(ui, "connections", record.max_connections.to_string());
             field(ui, "retries", record.retries.to_string());
-            field(ui, "accept ranges", record.accept_ranges.to_string());
+            field(
+                ui,
+                "server supports ranges",
+                if record.accept_ranges {
+                    "yes — a stopped download continues where it left off".to_string()
+                } else {
+                    "no — a stopped download starts over from the beginning".to_string()
+                },
+            );
             if let (Some(algo), Some(expected)) =
                 (&record.checksum_algorithm, &record.checksum_expected)
             {
@@ -120,12 +152,15 @@ fn overview(ui: &mut Ui, record: &DownloadRecord, state: &GuiState, actions: &mu
                 field(ui, "user agent", ua.clone());
             }
             if let Some(err) = &record.error {
-                ui.label(RichText::new("last error").small().color(weak));
-                ui.label(
-                    RichText::new(err)
-                        .monospace()
-                        .small()
-                        .color(Color32::from_rgb(220, 38, 38)),
+                components::key_label(ui, palette, "last error");
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(err)
+                            .monospace()
+                            .small()
+                            .color(palette.danger),
+                    )
+                    .wrap(),
                 );
                 ui.end_row();
             }
@@ -139,7 +174,7 @@ fn overview(ui: &mut Ui, record: &DownloadRecord, state: &GuiState, actions: &mu
             }
         });
 
-    ui.add_space(8.0);
+    ui.add_space(sizes.details_grid_spacing[1]);
     ui.horizontal_wrapped(|ui| {
         if ui.button("Copy URL").clicked() {
             actions.push(UiAction::CopyToClipboard(record.url.clone()));
@@ -147,10 +182,18 @@ fn overview(ui: &mut Ui, record: &DownloadRecord, state: &GuiState, actions: &mu
         if ui.button("Copy output path").clicked() {
             actions.push(UiAction::CopyToClipboard(record.output_path.clone()));
         }
-        if ui.button("Open folder").clicked() {
+        if ui
+            .button("Open folder")
+            .on_hover_text(ux::open_folder_tooltip())
+            .clicked()
+        {
             actions.push(UiAction::OpenOutputFolder(record.id));
         }
-        if ui.button("Copy CLI command").clicked() {
+        if ui
+            .button("Copy CLI command")
+            .on_hover_text("Copy the matching `rdm download …` command for a terminal")
+            .clicked()
+        {
             actions.push(UiAction::CopyToClipboard(cli_command(record)));
         }
     });
@@ -174,67 +217,84 @@ fn cli_command(record: &DownloadRecord) -> String {
     cmd
 }
 
-fn chunks(ui: &mut Ui, state: &GuiState) {
+fn chunks(ui: &mut Ui, state: &GuiState, palette: &Palette) {
+    let sizes = Sizes::default();
     if state.chunks.is_empty() {
-        ui.label(
-            RichText::new("No chunk rows yet.")
-                .italics()
-                .color(ui.visuals().weak_text_color()),
+        components::hint(
+            ui,
+            palette,
+            "No partial data yet — nothing has been fetched for this download.",
         );
         return;
     }
-    let weak = ui.visuals().weak_text_color();
     egui::Grid::new("detail-chunks")
         .num_columns(7)
         .striped(true)
-        .spacing([10.0, 6.0])
+        .spacing(sizes.chunk_grid_spacing)
         .show(ui, |ui| {
             for head in ["#", "START", "END", "DONE", "PROGRESS", "STATUS", "ERROR"] {
-                ui.label(RichText::new(head).small().strong());
+                ui.label(
+                    RichText::new(head)
+                        .small()
+                        .strong()
+                        .color(palette.text_muted),
+                );
             }
             ui.end_row();
             for chunk in &state.chunks {
-                ui.label(RichText::new(chunk.idx.to_string()).monospace().small());
-                ui.label(RichText::new(chunk.start.to_string()).monospace().small());
-                ui.label(RichText::new(chunk.end.to_string()).monospace().small());
-                ui.label(
-                    RichText::new(human::human_bytes(chunk.downloaded.max(0) as u64))
-                        .monospace()
-                        .small(),
-                );
-                let len = chunk.len().max(1) as f32;
-                ui.add(
-                    egui::ProgressBar::new((chunk.downloaded.max(0) as f32 / len).clamp(0.0, 1.0))
-                        .desired_width(120.0),
-                );
-                let color = match chunk.status {
-                    ChunkStatus::Completed => Color32::from_rgb(22, 163, 74),
-                    ChunkStatus::Active => Color32::from_rgb(37, 99, 235),
-                    ChunkStatus::Failed => Color32::from_rgb(220, 38, 38),
-                    ChunkStatus::Pending => weak,
-                };
-                ui.label(RichText::new(chunk.status.to_string()).small().color(color));
-                ui.label(
-                    RichText::new(chunk.error.clone().unwrap_or_default())
-                        .small()
-                        .color(Color32::from_rgb(220, 38, 38)),
-                );
-                ui.end_row();
+                chunk_row(ui, chunk, palette, &sizes);
             }
         });
 }
 
+fn chunk_row(ui: &mut Ui, chunk: &ChunkRecord, palette: &Palette, sizes: &Sizes) {
+    let number = |ui: &mut Ui, value: String| {
+        ui.label(
+            RichText::new(value)
+                .monospace()
+                .small()
+                .color(palette.text_primary),
+        );
+    };
+    number(ui, chunk.idx.to_string());
+    number(ui, chunk.start.to_string());
+    number(ui, chunk.end.to_string());
+    ui.label(
+        RichText::new(human::human_bytes(chunk.downloaded.max(0) as u64))
+            .monospace()
+            .small()
+            .color(palette.text_primary),
+    );
+    let len = chunk.len().max(1) as f32;
+    ui.add(
+        egui::ProgressBar::new((chunk.downloaded.max(0) as f32 / len).clamp(0.0, 1.0))
+            .desired_width(sizes.progress_chunk),
+    );
+    ui.label(
+        RichText::new(chunk.status.to_string())
+            .small()
+            .color(palette.chunk_color(chunk.status)),
+    );
+    ui.label(
+        RichText::new(chunk.error.clone().unwrap_or_default())
+            .small()
+            .color(palette.danger),
+    );
+    ui.end_row();
+}
+
 fn json(ui: &mut Ui, state: &GuiState, actions: &mut Vec<UiAction>) {
+    let spacing = Spacing::default();
     if ui.button("Copy JSON").clicked() {
         actions.push(UiAction::CopyToClipboard(state.json.clone()));
     }
-    ui.add_space(6.0);
+    ui.add_space(spacing.sm);
     let mut text = state.json.clone();
     ui.add(
         egui::TextEdit::multiline(&mut text)
             .code_editor()
             .desired_width(f32::INFINITY)
-            .desired_rows(18)
+            .desired_rows(Sizes::default().json_rows)
             .interactive(false),
     );
 }
