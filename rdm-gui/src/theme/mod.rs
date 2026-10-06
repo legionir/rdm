@@ -221,10 +221,21 @@ mod tests {
             });
         });
 
-        for (name, height) in heights {
+        // The message starts with “assertion” and carries every measurement on
+        // purpose: the Windows job surfaces a test failure as a workflow
+        // annotation filtered by that keyword, so a reviewer sees exactly which
+        // control is off and by how much without a second run.
+        let measured = heights
+            .iter()
+            .map(|(name, height)| format!("{name} {height:.2} pt"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        for (name, height) in &heights {
+            let height = *height;
             assert!(
                 (height - expected).abs() < 1.0,
-                "{name} is {height:.1} pt, expected the shared control height {expected:.1} pt"
+                "assertion: {name} is {height:.2} pt, expected the shared control height \
+                 {expected:.2} pt — measured: {measured}"
             );
         }
     }
