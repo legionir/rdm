@@ -561,8 +561,12 @@ mod tests {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::Vec2::splat(32.0));
         let mesh = logo_mesh(rect, 16);
         // The asset is a blue rounded square with a white glyph on it: both
-        // colours have to survive the box filter.
-        let is_blue = |c: &egui::Color32| c.b() > 120 && c.b() > c.r() + 40;
+        // colours have to survive the box filter. The comparisons widen to
+        // `u16`: `255u8 + 40` wraps in a release build, and a test that wraps is
+        // a test that lies (the first version of this one did, and CI said so).
+        let is_blue = |c: &egui::Color32| {
+            c.b() > 120 && u16::from(c.b()) > u16::from(c.r()) + 40
+        };
         let is_light = |c: &egui::Color32| c.r() > 180 && c.g() > 180 && c.a() > 180;
         assert!(
             mesh.vertices.iter().any(|v| is_blue(&v.color)),
@@ -574,7 +578,10 @@ mod tests {
         );
         // ... and nothing is a colour the asset never contains (a red channel
         // past the blue one would mean the channels got mixed up).
-        assert!(mesh.vertices.iter().all(|v| v.color.r() <= v.color.b() + 40));
+        assert!(mesh
+            .vertices
+            .iter()
+            .all(|v| u16::from(v.color.r()) <= u16::from(v.color.b()) + 40));
     }
 
     #[test]

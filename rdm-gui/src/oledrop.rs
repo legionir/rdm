@@ -186,6 +186,12 @@ pub struct Sink {
     pub drop: Box<dyn Fn(DropPayload) + Send + Sync>,
 }
 
+/// `#[repr(C)]` is not decoration here: OLE is handed a pointer to
+/// `Target::interface` and [`Target::from_interface`] recovers the whole object
+/// from that pointer, so the interface *must* be at offset 0. Without `repr(C)`
+/// the compiler is free to order the fields any way it likes — which is exactly
+/// what the offset assertion in the tests below caught.
+#[repr(C)]
 struct Target {
     interface: IDropTarget,
     refcount: AtomicUsize,
