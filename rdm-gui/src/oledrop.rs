@@ -486,8 +486,13 @@ unsafe fn with_medium<T>(
 
 /// Hand a medium back the way `ReleaseStgMedium` would: the owning object
 /// releases it, or — when there is none — the heap block is freed.
+///
+/// `GlobalFree` is declared by `windows-sys` next to `HGLOBAL` itself (in
+/// `Win32::Foundation`), unlike `GlobalLock`/`GlobalSize`/`GlobalUnlock`, which
+/// live in `Win32::System::Memory` — hence the two paths below that look like a
+/// mistake and are not.
 unsafe fn release_medium(medium: &StgMedium) {
-    use windows_sys::Win32::System::Memory::GlobalFree;
+    use windows_sys::Win32::Foundation::GlobalFree;
 
     if !medium.release.is_null() {
         let vtbl = unsafe { *(medium.release as *const *const IUnknownVtbl) };
