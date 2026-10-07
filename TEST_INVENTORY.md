@@ -160,11 +160,13 @@ logo, with nothing written on it” is a test and not a hope.
   then the staged artifact `rdm-gui-windows-x86_64.exe`
 
 Last verified counts, Windows runner: `test-windows` ✓ and `build-gui-windows` ✓ on run
-**37546378552** (`ce38af6`, 2026-10-07, plus the `pull_request` twin 37546382954) — the GUI job
-built the crate, ran the 109 cases listed above (0 failed: the *Surface test failures* step
-stayed skipped) and uploaded the binary (5,821,067 bytes); the `release` job skipped itself,
-as it only runs for `v*` tags. Before that, 104 cases were green on **37535678990** (`668166d`).
-The rounds that led there — the round-3 heights work (37522424155, `8b03d25`, 99 cases), the
-round-4 tray fix (37534564654 → 37535011455 → 37535678990) and the round-5 tray/padding/gap
-fix (37546378552) — are recorded with their causes in
-`audits/evidence/ux-feature-pack-ci-runs.json`.
+**37553244501** (`a859ebc`, 2026-10-07, plus the `pull_request` twin 37553248764) — the GUI job
+built the crate, ran the **119** cases listed above (0 failed: the *Surface test failures* step
+stayed skipped) and uploaded the binary (5,821,355 bytes); the `release` job skipped itself,
+as it only runs for `v*` tags. Round 6 needed three attempts to get there, each caught by this
+job and each recorded in the run list: a `windows-sys` path that does not exist
+(37551901919), a test target that needed `Guid: Debug` (37552333201), and two test failures
+that were real — the COM object missing `#[repr(C)]` and a wrapping `u8` comparison in the
+colour test (37552733634). Before that, 109 cases were green on **37546378552** (`ce38af6`),
+104 on **37535678990** (`668166d`) and 99 on **37522424155** (`8b03d25`); every round and its
+cause is recorded in `audits/evidence/ux-feature-pack-ci-runs.json`.

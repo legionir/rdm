@@ -486,3 +486,92 @@ why `theme::icons` exists and glyphs are banned).
 
 No user-facing copy, no colour and no workflow file moved; the CLI and its tests are
 untouched.
+
+## 16. Round 6 (2026-10-07) — the mark is the app's own logo, and a dropped link finally arrives
+
+### 16.1 The reports
+
+| # | Report | Visible effect |
+| --- | --- | --- |
+| R6-1 | “Make the floating button a small circle with the app logo inside it, with no explanation at all.” («floating button رو یک دایره کوچک کن که توش لوگو برنامه باشه بدون هیچ توضیحی») | A 76 pt circle with the generic drawn *download* glyph and a tooltip that explained itself — more furniture than mark, and generic where the app's own face belongs |
+| R6-2 | “I dropped a link on it and it did not work — look into it and fix it.” | Dropping a link from a browser did nothing whatsoever: no form, no status sentence, no reaction of any kind |
+
+### 16.2 Root cause (R6-2 — read from the upstream sources, not guessed)
+
+The window's own drag-and-drop never told the app that anything had happened.
+`winit` 0.30.5, `platform_impl/windows/drop_handler.rs`: the `IDropTarget` it installs
+for a window asks its data object for exactly one format —
+`FORMATETC { cfFormat: CF_HDROP, tymed: TYMED_HGLOBAL, aspect: DVASPECT_CONTENT, lindex: -1 }` —
+and when the source answers `DV_E_FORMATETC` it concludes “not a file” and reports
+`DROPEFFECT_NONE` from `DragEnter`. Windows then **never calls `Drop`**. A link dragged from
+Chrome, Edge or Firefox offers `CF_UNICODETEXT` and `text/uri-list` (plus HTML), never
+`CF_HDROP` — so no `WindowEvent::DroppedFile` was delivered, egui's `raw.dropped_files`
+stayed empty, and the clipboard fallback the app had shipped since round 2 never ran: it had
+nothing to react to. The only feedback the user got was the “no drop” cursor, and only if
+they were looking at it.
+
+Two further facts about that handler shape the fix: its `QueryInterface` is
+`unimplemented!()` — a panic inside a COM callback crosses `extern "system"` and aborts the
+*process* — and it never hands the medium back through `ReleaseStgMedium`. OLE allows exactly
+one drop target per window, and winit revokes its own when the window is destroyed, so taking
+the window over is both sanctioned and leak-free.
+
+### 16.3 What changed
+
+| Report | Change | Where |
+| --- | --- | --- |
+| R6-1 | The mark is 52 pt (was 76) and carries **the application's own icon** — the same 64×64 RGBA asset as the window, taskbar and tray icon — with no label and **no tooltip**. The icon is drawn as a `Mesh` (`logo_mesh`) box-filtered from the asset rather than uploaded as a texture, so the drawing is a pure function with unit tests | `rdm-gui/src/dropzone.rs` |
+| R6-2 | The mark registers **its own `IDropTarget`** on its own window: it accepts `CF_HDROP` files, `CF_UNICODETEXT`, `text/uri-list`, `UniformResourceLocatorW` and the HTML spellings, reads whatever is really there, and hands the raw payload to `dropzone::resolve_drop`. Every arrival path — OLE on Windows, egui's input elsewhere — meets at that one function, so the outcome cannot differ by platform and a drop is never silent | `rdm-gui/src/oledrop.rs` (new), `rdm-gui/src/dropzone.rs`, `rdm-gui/src/windows.rs` |
+
+Design notes worth keeping:
+
+* **The mark's window title is a contract.** `windows::DROP_TARGET_TITLE`
+  (`rdm — drop target`) still ranks 0 in `title_rank`, so the main-window search can never
+  adopt the mark, and the mark's own handle is found by that exact title (top-level, unowned,
+  same process) because eframe exposes no native handle for a viewport.
+* **Accepting more than it can read is deliberate.** A drag that offers only HTML is accepted
+  (the cursor says “copy”, the drop arrives), and the announced clipboard fallback finishes
+  the job; refusing it would leave the user with a mark that ignores them.
+* **Nothing is guessed about the ABI.** The hand-written COM vtable layouts are pinned by
+  unit tests — three `IUnknown` slots, seven for `IDropTarget`, six for `IDataObject`, the
+  offset of the interface inside the object, and the sizes of `FORMATETC`/`STGMEDIUM` per
+  pointer width.
+
+### 16.4 Verification
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| The drop policy is a pure function, one test per payload class | PASS | `dropzone.rs` (8 tests): a browser's link in the text, a Qt/GTK link in the uri-list, a `.url` file's link from inside the file, a file that holds none (a sentence, and **no** silent clipboard import), an empty clipboard explained, the clipboard as the announced last resort, drain/activation one-shot |
+| The transport is pinned structurally, not by hope | PASS | `oledrop.rs` (5 tests): vtable slot counts 3/7/6, `Guid` = 16 bytes, `offset_of!(Target, interface) == 0`, UTF-16 stops at its terminator, whitespace is not text, a payload is “readable” only when something survived |
+| The mark is the app's logo and nothing else | PASS | `dropzone.rs`: the mark is a square window between 40 and 64 pt, the logo mesh is one quad per grid cell of the asset, stays inside its rect, keeps the asset's transparent corners and its blue/white, and never mixes the channels up |
+| The upstream behaviour the fix depends on | Read, not guessed | `winit` 0.30.5 `platform_impl/windows/drop_handler.rs` (the single `CF_HDROP` format, `DROPEFFECT_NONE`, `unimplemented!()`), `window.rs` (`OleInitialize` when drag-and-drop is on), `event_loop.rs` (`RevokeDragDrop` on destroy); `egui-winit` 0.29.1 `lib.rs` (the builder flag really reaches winit) |
+| The whole GUI crate still parses | PASS | `tree-sitter` (Rust grammar) over all 30 `rdm-gui` sources: zero `ERROR`/missing nodes |
+| Design and copy audits | PASS | `audits/ui-contrast-check.py` (30 Rust files: delimiters balanced; 9 UI files colour-clean), `audits/ux-terminology-check.py`: PASS — no new user-facing copy, every sentence a drop can produce already existed in `platform`/`ux` |
+| Windows compile + 119 GUI tests | PASS | run **37553244501** (`a859ebc`; `pull_request` twin 37553248764): `test-windows` ✓, `build-gui-windows` ✓ — build, **119 GUI tests**, stage, upload (`rdm-gui-windows-x86_64.exe`, 5,821,355 bytes); the annotation steps stayed skipped and `release` skipped itself (not a tag) |
+| A real drag from a browser onto the mark | **NOT RUN in this environment** | The same escape as the tray (`UX-ESC-005` class): proven from the upstream source, the unit tests and the compile; the run's binary is the thing to try |
+
+#### The path to green — what CI caught, in order
+
+Three attempts, each failing for a different reason, and the last two were the
+job doing exactly what it exists for:
+
+| Attempt | Failure | What it means |
+| --- | --- | --- |
+| `cd8affe` (37551901919 / 37551906837) | `error[E0432]: unresolved import windows_sys::Win32::System::Memory::GlobalFree` | one `windows-sys` path was written from memory instead of from the docs: `GlobalFree` is declared next to `HGLOBAL` in `Win32::Foundation`, while `GlobalLock`/`GlobalSize`/`GlobalUnlock` really are in `Win32::System::Memory`. The comment in the code now says why the two differ |
+| `7d8dcd1` (37552333201 / 37552338790) | test target: `oledrop::Guid` does not implement `Debug` (the IID test uses `assert_ne!`), plus the new `float_literal_f32_fallback` warning from a bare `3.0`/`2.0` passed to `Stroke::new(impl Into<f32>)` | the *build* was already clean — this was the test target, which is why the two steps are separate |
+| `e498440` (37552733634 / 37552738654) | 117 passed, 2 failed: `the_com_layouts_match_the_abi` (`offset_of!(Target, interface) != 0`) and `the_logo_keeps_the_icons_colours` | both were real. `Target` was missing `#[repr(C)]`, so the compiler was free to place `interface` anywhere — but `from_interface` recovers the whole object from that pointer, so a reordered field means every drop callback reads the wrong memory. And the colour assertion compared `r <= b + 40` in `u8`, which **wraps** in a release build (`255 + 40 == 39`): the test was lying about the very cells it was checking |
+| `a859ebc` (37553244501 / 37553248764) | — | green |
+
+### 16.5 Change manifest (round 6)
+
+| File | Action | Scope | Reason | Test status |
+| --- | --- | --- | --- | --- |
+| `rdm-gui/src/oledrop.rs` | added | desktop integration | the mark's own OLE drop target — files, text, URI lists, URL/HTML acceptance; COM layouts pinned | 5 unit tests (Windows-only) |
+| `rdm-gui/src/dropzone.rs` | changed | UX / drawing | a 52 pt circle carrying the app's logo, no text; one drop policy for every arrival path | 8 unit tests |
+| `rdm-gui/src/windows.rs` | changed | desktop integration | `DROP_TARGET_TITLE`; the mark's window found by exact title (same process, top-level, unowned); `is_window` for the remembered handle | compiled by the Windows job |
+| `rdm-gui/Cargo.toml` | changed | build | `windows-sys` features `Win32_System_Ole`, `Win32_System_Memory`, `Win32_System_DataExchange`, `Win32_UI_Shell` | built by the Windows job |
+| `rdm-gui/src/main.rs` | changed | build | `mod oledrop` (Windows only) | — |
+| `TEST_INVENTORY.md`, `audits/ux-feature-pack-report.md`, `audits/evidence/ux-feature-pack-ci-runs.json` | changed | docs | suite 109 → 119, this section, and the run record | — |
+
+No user-facing copy was added, no colour and no workflow file moved; the CLI and its tests are
+untouched.
