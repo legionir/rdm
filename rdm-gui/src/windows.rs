@@ -146,12 +146,80 @@ pub fn remember_main_window_from(_source: &impl raw_window_handle::HasWindowHand
     remember_main_window(0);
 }
 
+/// The floating drop target's window title.
+///
+/// Nobody ever *sees* this string: the mark is borderless, out of the taskbar
+/// and out of Alt-Tab, and it deliberately carries no text. It exists so the
+/// app can find the mark's own window and register its drop target on it
+/// ([`drop_target_window`]) — eframe exposes no native handle for a viewport.
+pub const DROP_TARGET_TITLE: &str = "rdm — drop target";
+
+/// Is this still a window?
+///
+/// The same rule [`resolve_window`] applies to the remembered main window: a
+/// handle outlives the window it named (Windows recycles them).
+#[cfg(target_os = "windows")]
+pub fn is_window(hwnd: isize) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+
+    hwnd != 0 && unsafe { IsWindow(hwnd) } != 0
+}
+
+/// The floating mark's window handle, by its exact title.
+///
+/// Same rules as [`search_main_window`]: only top-level, unowned windows of
+/// *this* process, so no title on any other window can be mistaken for ours.
+/// `None` while the window does not exist yet — the caller asks again on the
+/// next frame — so the mark's target is installed as soon as the window is
+/// really there, and never before.
+#[cfg(target_os = "windows")]
+pub fn drop_target_window() -> Option<isize> {
+    use windows_sys::Win32::Foundation::LPARAM;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindow, GetWindowTextW, GetWindowThreadProcessId, GW_OWNER,
+    };
+
+    struct Search {
+        pid: u32,
+        hwnd: isize,
+    }
+
+    unsafe extern "system" fn visit(hwnd: isize, lparam: LPARAM) -> i32 {
+        let search = &mut *(lparam as *mut Search);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        // Only our own windows: registering a drop target on somebody else's
+        // window would be a desktop accident, whatever its title says.
+        if pid != search.pid {
+            return 1;
+        }
+        if GetWindow(hwnd, GW_OWNER) != 0 {
+            return 1; // an owned popup, not our top-level mark
+        }
+        let mut buf = [0u16; 128];
+        let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+        let title = String::from_utf16_lossy(&buf[..len.max(0) as usize]);
+        if title == DROP_TARGET_TITLE {
+            search.hwnd = hwnd;
+            return 0; // found it: stop the walk
+        }
+        1
+    }
+
+    let mut search = Search {
+        pid: std::process::id(),
+        hwnd: 0,
+    };
+    unsafe { EnumWindows(Some(visit), &mut search as *mut Search as LPARAM) };
+    (search.hwnd != 0).then_some(search.hwnd)
+}
+
 /// How promising a window title is.
 ///
 /// `2` is the main window itself, `1` a plausible stand-in, `0` something that
-/// is definitely not it: the floating drop target, the Settings window and the
-/// Help window all title themselves `rdm — …`, and the tray and winit helper
-/// windows have no title at all.
+/// is definitely not it: the floating drop target ([`DROP_TARGET_TITLE`]), the
+/// Settings window and the Help window all title themselves `rdm — …`, and the
+/// tray and winit helper windows have no title at all.
 #[cfg(any(target_os = "windows", test))]
 fn title_rank(title: &str) -> u8 {
     if title == MAIN_TITLE {
@@ -450,7 +518,11 @@ mod tests {
         assert_eq!(title_rank("RDM"), 2);
         assert_eq!(title_rank("rdm — Settings"), 0);
         assert_eq!(title_rank("rdm — Help"), 0);
-        assert_eq!(title_rank("rdm — drop a link on the mark"), 0);
+        assert_eq!(title_rank(DROP_TARGET_TITLE), 0);
+        // ... and the drop target's own search must not match the main window
+        // (both are "our" windows; only one of them takes drops).
+        assert_ne!(DROP_TARGET_TITLE, MAIN_TITLE);
+        assert!(DROP_TARGET_TITLE.starts_with("rdm"));
         // Windows without a title (the tray window, winit's helpers) are not it.
         assert_eq!(title_rank(""), 0);
         // Anything else is only a stand-in, never preferred over "RDM".
