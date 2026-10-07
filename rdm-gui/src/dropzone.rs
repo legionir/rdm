@@ -33,9 +33,12 @@
 //! hands the URI list to the toolkit, and egui's input is used directly.
 //!
 //! Whichever path a drop arrives on, this module turns it into one sentence and
-//! at most one link (see [`resolve_drop`]) — and if nothing readable arrives,
-//! the **clipboard** is tried, because a user who just dragged a link has
-//! almost always copied it too. A drop is never silent.
+//! at most one link (see [`resolve_drop`]) — and when the drag was not a file and
+//! its link could not be read, the **clipboard** is tried, because a user who
+//! just dragged a link has almost always copied it too (and the sentence says
+//! when that is what happened). A dropped *file* that holds no link is answered
+//! with a sentence instead: it is the thing the user dragged, so it is the thing
+//! the app answers. A drop is never silent.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
@@ -102,8 +105,11 @@ pub struct TargetDrop {
 
 /// The drop policy, as a pure function: payload in, sentence and link out.
 ///
-/// `clipboard_link` is the last resort, and passing it in (instead of reading
-/// the clipboard here) is what makes every branch of this testable.
+/// The order is the app's long-standing one: the payload's text (where a
+/// browser puts its link), then its URI list (a Qt/GTK link, or a link inside a
+/// dropped file), then — only when the drag was not a file — the clipboard,
+/// announced. `clipboard_link` is passed in rather than read here so that every
+/// branch is testable.
 pub fn resolve_drop(payload: &DropPayload, clipboard_link: Option<String>) -> TargetDrop {
     // The same precedence the app has always used: text first (a browser's
     // link), then the URI list, then paths (a `.url` file holds its link).
@@ -134,9 +140,22 @@ pub fn resolve_drop(payload: &DropPayload, clipboard_link: Option<String>) -> Ta
             };
         }
     }
+    if !payload.files.is_empty() {
+        // A *file* that holds no link is answered with the sentence and nothing
+        // else: importing whatever the user happened to copy earlier because
+        // they dragged `report.pdf` over the mark would be a surprise, however
+        // well announced.
+        return TargetDrop {
+            url: None,
+            note: report.note,
+        };
+    }
+
     match clipboard_link {
-        // A link dragged from a browser carries no file path on some sources;
-        // the clipboard is the honest fallback, and it is announced.
+        // A drag that was not a file and whose link could not be read (a source
+        // spelling it in a format this app does not parse): the clipboard is the
+        // honest fallback — a user who just dragged a link has almost always
+        // copied it too — and it is announced.
         Some(link) => TargetDrop {
             url: Some(link.clone()),
             note: ux::drop_used_clipboard(&link),
@@ -286,7 +305,8 @@ impl DropZone {
     pub fn accept(&self, payload: DropPayload) {
         let drop = resolve_drop(&payload, clipboard::url());
         tracing::info!(
-            "drop target: {} file(s), text {}, uri-list {} -> {}{}",
+            "drop target: readable={} — {} file(s), text {}, uri-list {} -> {}{}",
+            payload.is_readable(),
             payload.files.len(),
             payload.text.is_some(),
             payload.uri_list.is_some(),
@@ -378,7 +398,9 @@ impl DropZone {
                 };
                 let painter = ui.painter();
                 painter.circle_filled(center, radius, fill);
-                let ring_width = if dragging { 3.0 } else { 2.0 };
+                // Typed on purpose: `Stroke::new` takes `impl Into<f32>`, and
+                // a bare literal only *happens* to fall back to `f32` today.
+                let ring_width: f32 = if dragging { 3.0 } else { 2.0 };
                 painter.circle_stroke(center, radius, Stroke::new(ring_width, ring));
                 // The app mark, and nothing else: no label, no tooltip. Its
                 // transparent corners let the circle's own fill show through.
@@ -614,8 +636,9 @@ mod tests {
                 files: vec![path.clone()],
                 ..Default::default()
             },
-            // Not even the clipboard may talk the app into “it worked”: the
-            // payload answered, and the answer was no.
+            // A file is the thing the user dragged, so it is the thing the
+            // app answers: the clipboard is only tried for a drag that was
+            // *not* a file, and it may not turn this into “it worked”.
             Some("https://example.com/from-clipboard.zip".to_string()),
         );
         let _ = std::fs::remove_file(&path);

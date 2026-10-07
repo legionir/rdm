@@ -59,7 +59,7 @@ const E_NOINTERFACE: Hresult = 0x8000_4002u32 as i32;
 /// A COM `GUID`, declared here so this module needs nothing from `windows-sys`
 /// beyond the functions it calls. Layout is the documented one.
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Guid {
     data1: u32,
     data2: u16,
