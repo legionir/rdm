@@ -19,6 +19,10 @@ mod dropzone;
 mod frames;
 mod icon;
 mod logging;
+// The mark's own OLE drop target. Windows only: elsewhere the window manager
+// hands a dragged link to the toolkit, and `dropzone` reads egui's input.
+#[cfg(target_os = "windows")]
+mod oledrop;
 mod platform;
 mod settings;
 mod state;

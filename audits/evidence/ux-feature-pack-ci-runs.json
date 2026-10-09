@@ -224,5 +224,99 @@
       "every captured line is appended to rdm-gui.log in the data directory, one line per open; the relays log each command and whether they armed; the hide decision logs its result"
     ],
     "not_run": "the tray round trip on a real Windows desktop; rdm-gui.log from that session is the evidence to return -> UX-ESC-005"
+  },
+
+  "round_5_2026_10_07": {
+    "trigger": "the product owner reported three defects from the running build: (1) with the window in the tray a right click opened the menu, which closed at once while the window came to the front, (2) Help and Settings had no padding around their content, (3) the icon of a button with a label was glued to the label",
+    "causes": {
+      "tray": "`tray-icon` 0.26 sends a `TrayIconEvent::Click` for every button and both edges on Windows, and shows the menu itself on the right-button release; both readers of that channel matched `Click { .. }` with no button filter, so the right click became `TrayCommand::Show` -> `reveal_main_window()` -> `SetForegroundWindow`, which took the foreground from the popup and dismissed the menu that click had just opened",
+      "padding": "`views/help_overlay.rs` and `views/settings_view.rs` drew their content in `Frame::none()`, which insets nothing at all",
+      "icon_gap": "`components::icon_text_button` reserved the icon slot with three literal spaces and painted the icon at a fixed inset, so how much room the label left depended on the font; on the shipped font the label's ink began inside the icon rectangle"
+    },
+    "fixes": [
+      "`tray::command_for_icon_event`: `Show` only for `MouseButton::Left` with `MouseButtonState::Up` (or the left double click); right, middle, enter/move/leave map to nothing; both readers of the channel go through the one function",
+      "`theme::window_frame` and `Spacing::window_padding` (12 x 10), used by both windows; the help window's `add_space(xs)` substitute is gone",
+      "`components::icon_text_layout` and `Spacing::icon_in_button` (16 pt): the control is sized from the measured label and the tokens, and the icon and the label are painted into `Button::new(\"\").min_size(layout.size)`, whose label is reported through `WidgetInfo::labeled`"
+    ],
+    "rounds": [
+      {
+        "sha": "ce38af6",
+        "runs": [
+          37546378552,
+          37546382954
+        ],
+        "conclusion": "success",
+        "cause": null,
+        "detail": "first run of the fix is green: `test-windows` and `build-gui-windows` both pass (build, 109 GUI tests, stage, upload: `rdm-gui-windows-x86_64.exe`, 5,821,067 bytes); the compiler-error and test-failure annotation steps stayed skipped, i.e. nothing to annotate; `release` skipped itself because the push is not a tag"
+      }
+    ],
+    "local_verification_before_the_push": [
+      "tree-sitter (Rust grammar) over all 29 `rdm-gui` sources: no ERROR or missing node, with the checker validated against a deliberately broken file",
+      "`audits/ui-contrast-check.py` PASS: token discipline in 9 UI files, every declared token field has a default, delimiters balanced in 29 Rust files",
+      "`audits/ux-terminology-check.py` PASS: no user-facing copy moved in this round"
+    ],
+    "not_run": "the tray round trip on a real Windows desktop (same escape as round 4: the fix is proven from the upstream event stream and by the unit tests; the run's binary is the artifact to try) -> UX-ESC-005"
+  },
+  "round_6_2026_10_07": {
+    "trigger": "the product owner reported, from the running build: (1) the floating mark should be a small circle carrying the application's own logo with no explanation at all, (2) a link dragged from a browser onto that mark did nothing \u2014 investigate and fix it",
+    "causes": {
+      "link_drop": "the drop handler `winit` 0.30.5 installs on Windows accepts exactly one clipboard format \u2014 CF_HDROP (`platform_impl/windows/drop_handler.rs` builds a FORMATETC with that single cfFormat and answers DROPEFFECT_NONE when the data object returns DV_E_FORMATETC). A link dragged from Chrome/Edge/Firefox offers CF_UNICODETEXT and text/uri-list, not a file, so Windows never called `Drop`: no WindowEvent::DroppedFile reached egui, and the app's clipboard fallback never ran because the app was never told that anything happened",
+      "mark": "the mark had been a 76 pt circle drawing the generic *download* glyph with the tooltip \"Drop a link here to start a download\"; the owner asked for the app's own face, and for nothing to be explained on it"
+    },
+    "fixes": [
+      "`src/oledrop.rs` (new, Windows only): the mark registers its own `IDropTarget` on its own window (`OleInitialize` + `RevokeDragDrop` + `RegisterDragDrop`), accepts CF_HDROP files, CF_UNICODETEXT, text/uri-list, UniformResourceLocatorW and the HTML spellings, reads what is really there, and hands the raw payload to `dropzone`; the COM vtable layouts, the two IIDs, medium release (`ReleaseStgMedium` semantics) and a `catch_unwind` around the sink calls live in one module with the shapes pinned by tests",
+      "`dropzone::resolve_drop` is the one policy every arrival path meets (OLE on Windows, egui's input elsewhere): text (a browser's link) -> URI list (a Qt/GTK link, or a link inside a dropped file) -> the clipboard, announced, and only when the drag was not a file; a dropped file that holds no link is answered with a sentence instead of a silent clipboard import",
+      "the mark: SIZE 76 -> 52 pt, DIAMETER 0.88, the app logo drawn as a box-filtered mesh from the embedded 64x64 asset (`logo_mesh`), no label and no tooltip; the window keeps the title `rdm \u2014 drop target` (`DROP_TARGET_TITLE`) so the main-window search can never adopt it",
+      "`windows::drop_target_window()` finds the mark's window by that exact title (same process, top-level, unowned) because eframe exposes no native handle for a viewport; `windows::is_window` validates a remembered handle before it is used"
+    ],
+    "rounds": [
+      {
+        "sha": "cd8affe",
+        "runs": [
+          37551901919,
+          37551906837
+        ],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "build-gui-windows: `src\\oledrop.rs:490:9 error[E0432]: unresolved import windows_sys::Win32::System::Memory::GlobalFree` \u2014 that path does not exist in windows-sys 0.52; `GlobalFree` is declared next to `HGLOBAL` in `Win32::Foundation`. test-windows passed"
+      },
+      {
+        "sha": "7d8dcd1",
+        "runs": [
+          37552333201,
+          37552338790
+        ],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "the release build was clean; `cargo test --release` failed because `oledrop::Guid` does not implement Debug and the IID test uses `assert_ne!`. The same run warned `float_literal_f32_fallback` at dropzone.rs:381 (a bare 3.0/2.0 passed to `Stroke::new(impl Into<f32>)`, future-incompatible)"
+      },
+      {
+        "sha": "e498440",
+        "runs": [
+          37552733634,
+          37552738654
+        ],
+        "conclusion": "failure",
+        "cause": "code",
+        "detail": "117 passed, 2 failed: `the_com_layouts_match_the_abi` (`offset_of!(Target, interface) != 0` \u2014 `Target` was not `#[repr(C)]`, and `from_interface` recovers the object from the interface pointer, so a reordered field would make every callback read the wrong memory) and `the_logo_keeps_the_icons_colours` (the assertion compared `r <= b + 40` in `u8`, which wraps in a release build: 255 + 40 == 39)"
+      },
+      {
+        "sha": "a859ebc",
+        "runs": [
+          37553244501,
+          37553248764
+        ],
+        "conclusion": "success",
+        "cause": null,
+        "detail": "first green run of the fix: `test-windows` and `build-gui-windows` both pass (build, 119 GUI tests, stage, upload: `rdm-gui-windows-x86_64.exe`, 5,821,355 bytes); the compiler-error and test-failure annotation steps stayed skipped, i.e. nothing to annotate; `release` skipped itself because the push is not a tag"
+      }
+    ],
+    "local_verification_before_the_push": [
+      "tree-sitter (Rust grammar) over all 30 `rdm-gui` sources: no ERROR or missing node, with the checker validated against a deliberately broken file",
+      "`audits/ui-contrast-check.py` PASS: token discipline in 9 UI files, every declared token field has a default, delimiters balanced in 30 Rust files",
+      "`audits/ux-terminology-check.py` PASS: no new user-facing copy \u2014 every sentence a drop can produce already existed in `platform`/`ux`",
+      "the drawing was checked against the asset itself (python over `assets/icon.rgba`): the mesh's cell colours keep the icon's blue (174 of 256 cells at the drawn grid) and its light glyph (20 cells), no cell is warmer than the asset allows, and the corner cell is transparent \u2014 the same numbers the unit tests assert"
+    ],
+    "not_run": "a real drag from a browser onto the mark on a real Windows desktop (the same escape class as UX-ESC-005: the transport is proven from the upstream source, pinned by the COM layout tests and compiled green; the run's binary is the artifact to try) -> UX-ESC-006"
   }
 }

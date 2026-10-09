@@ -58,13 +58,14 @@ pub fn show(ctx: &Context, state: &mut GuiState) -> Vec<UiAction> {
             theme::install(ctx, dark);
         }
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(palette.surface))
+            // The window padding token: the content must not touch the title
+            // bar, the scrollbar or the window edges (round-5 report).
+            .frame(theme::window_frame(&palette))
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .id_salt("help-window-scroll")
                     .show(ui, |ui| {
-                        ui.add_space(spacing.xs);
                         for (heading, lines) in ux::help_sections() {
                             components::section_title(ui, heading);
                             for line in lines {
