@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "RDM Download Helper",
+  "version": "0.1.0",
+  "description": "Send one link or a selected set of page links to RDM.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA17EuD2OPy+OoLYbgb2EeX09nymK0LCjsyDUzdFNdZ3PChXO6zT+4YQbECuLOBTUm3Cnw1RUJLi79XQXXgIAqK6YCx0mUoiBwHQBFuUNXsGpHjUC4uH1fkniha0Bf96Re/xgNbvKWLw5823rcCmmHfU3i3yTGpIZxH+B7lE2ucF7k9cOKxCAf+p7Y9TqEBB+b2iGFbWlFOZ7Lz2LyS3R8npioysGCAjurnc2EBoXaFdZZqO8bPA5UIAoO9DSxxWV9cmbZIKaNPGbtGkm5B8YS5s2QrMUkZHTaQqGMYXeijWFTTAvziSYqCfbTIddFSN+bwSEP/ZX+1jDnJtjRmtjzYQIDAQAB",
+  "minimum_chrome_version": "121",
+  "permissions": [
+    "contextMenus",
+    "nativeMessaging",
+    "notifications",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "256": "icon.png"
+  }
+}

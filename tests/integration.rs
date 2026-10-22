@@ -262,7 +262,7 @@ async fn segmented_download_matches_payload() {
 
     // Sidecar metadata must exist and be parseable.
     let sidecar = std::fs::read_to_string(
-        Path::new(&out).with_extension("bin.rdm.json"),
+        rdm::storage::metadata::sidecar_path(&out),
     )
     .unwrap_or_default();
     assert!(sidecar.contains("\"state\": \"completed\""));

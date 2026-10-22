@@ -8,7 +8,8 @@
 //!   file.zip
 //!   .rdm/<download-id>/
 //!     chunk-0001.tmp ...            (temporary chunk files)
-//!   file.zip.rdm.json               (human-readable metadata sidecar)
+//!   metadata/
+//!     file.zip.rdm.json             (human-readable metadata sidecar)
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -19,6 +20,7 @@ use crate::models::{ChunkRecord, DownloadRecord};
 
 pub const METADATA_DB_NAME: &str = "metadata.db";
 pub const STATE_SIDECAR_SUFFIX: &str = ".rdm.json";
+pub const SIDECAR_DIR_NAME: &str = "metadata";
 pub const CHUNK_DIR_PREFIX: &str = ".rdm";
 
 /// Persistent, human-readable description of a download.
@@ -94,22 +96,30 @@ impl DownloadMeta {
         }
     }
 
-    /// Write `meta` next to the final output file (atomic tmp + rename).
+    /// Write `meta` under the output directory's `metadata/` child (atomic
+    /// tmp + rename).  The directory is created lazily on the first sidecar.
     pub fn write_sidecar(&self, output_path: &Path) -> std::io::Result<()> {
         let path = sidecar_path(output_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         let tmp = path.with_extension("json.tmp");
-        let json = serde_json::to_vec_pretty(self)
-            .map_err(std::io::Error::other)?;
+        let json = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
         std::fs::write(&tmp, json)?;
         std::fs::rename(&tmp, &path)?;
         Ok(())
     }
 }
 
+/// `<output-dir>/metadata/<output-file-name>.rdm.json`.
 pub fn sidecar_path(output: &Path) -> PathBuf {
-    let mut s = output.as_os_str().to_os_string();
-    s.push(STATE_SIDECAR_SUFFIX);
-    PathBuf::from(s)
+    let parent = output.parent().unwrap_or_else(|| Path::new("."));
+    let mut filename = output
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("download"))
+        .to_os_string();
+    filename.push(STATE_SIDECAR_SUFFIX);
+    parent.join(SIDECAR_DIR_NAME).join(filename)
 }
 
 /// Directory that holds this download's chunk files.
@@ -123,4 +133,21 @@ pub fn chunk_dir_for(output: &Path, public_id: &str) -> PathBuf {
 /// Path of chunk `idx` inside its chunk dir.
 pub fn chunk_file(chunk_dir: &Path, idx: i64) -> PathBuf {
     chunk_dir.join(format!("chunk-{idx:04}.tmp"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sidecars_live_in_the_output_metadata_directory() {
+        assert_eq!(
+            sidecar_path(Path::new("downloads/file.zip")),
+            PathBuf::from("downloads/metadata/file.zip.rdm.json")
+        );
+        assert_eq!(
+            sidecar_path(Path::new("file.zip")),
+            PathBuf::from("metadata/file.zip.rdm.json")
+        );
+    }
 }

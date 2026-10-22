@@ -13,6 +13,10 @@ use crate::backend::StartRequest;
 pub enum UiAction {
     OpenAddDialog,
     SubmitNewDownload,
+    /// Accept the checked links in the browser's batch-selection window.
+    SubmitLinkSelection,
+    /// Dismiss that window without adding any (remaining) links.
+    CancelLinkSelection,
     Pause(i64),
     Resume(i64),
     Cancel(i64),
@@ -172,6 +176,22 @@ pub struct LogLine {
     pub text: String,
 }
 
+/// One checkbox row in the browser's “Download all links” window.
+#[derive(Debug, Clone)]
+pub struct LinkSelectionItem {
+    pub url: String,
+    pub label: Option<String>,
+    pub checked: bool,
+}
+
+/// Browser links awaiting the user's selection.  Nothing reaches the backend
+/// until OK is pressed.
+#[derive(Debug, Clone)]
+pub struct LinkSelection {
+    pub links: Vec<LinkSelectionItem>,
+    pub error: Option<String>,
+}
+
 /// Everything the widgets touch.
 pub struct GuiState {
     pub downloads: Vec<DownloadRecord>,
@@ -182,6 +202,9 @@ pub struct GuiState {
     pub show_add: bool,
     pub form: StartRequest,
     pub form_error: Option<String>,
+    /// Links supplied by “Download all links with RDM”, or `None` when its
+    /// window is closed.
+    pub link_selection: Option<LinkSelection>,
     /// The download whose details modal is open (double-click on a row).
     pub detail_id: Option<i64>,
     pub detail_tab: DetailTab,
@@ -229,6 +252,7 @@ impl GuiState {
             show_add: false,
             form,
             form_error: None,
+            link_selection: None,
             detail_id: None,
             detail_tab: DetailTab::Overview,
             footer_panel: None,

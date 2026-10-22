@@ -2,3 +2,6 @@
 # Python bytecode from the audit scripts
 __pycache__/
 *.pyc
+
+# Generated unpacked/packed browser extensions
+browser-extension/dist/

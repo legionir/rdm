@@ -123,9 +123,13 @@ impl Engine {
 
         // ---- 2. resolve destination --------------------------------------------
         let cwd = std::env::current_dir().context("cannot determine current directory")?;
+        // A redirect can end at a more useful path than the original URL.  The
+        // probe has already retained any Content-Disposition hint from either
+        // URL, so using the effective URL here only changes the path fallback.
+        let naming_url = url::Url::parse(&probe.effective_url).unwrap_or_else(|_| url.clone());
         let output = crate::utils::path::resolve_output_path(
             opts.output.as_deref(),
-            &url,
+            &naming_url,
             probe.disposition_filename.as_deref(),
             &cwd,
         )?;
