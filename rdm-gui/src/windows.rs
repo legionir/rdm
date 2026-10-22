@@ -214,6 +214,41 @@ pub fn drop_target_window() -> Option<isize> {
     (search.hwnd != 0).then_some(search.hwnd)
 }
 
+/// Restore the floating mark's per-pixel transparency on Windows.
+///
+/// eframe 0.29's glutin path can clear winit's transparent attribute while
+/// finalising a deferred viewport when the selected GL config reports no alpha
+/// support. The Windows compositor can still blend that alpha; without this
+/// call the supposedly transparent mark has an opaque black square behind it.
+/// An empty DWM blur region is the same native setup winit uses for a window
+/// created with `transparent = true`.
+#[cfg(target_os = "windows")]
+pub fn enable_drop_target_transparency(hwnd: isize) -> bool {
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmEnableBlurBehindWindow, DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND,
+    };
+    use windows_sys::Win32::Graphics::Gdi::{CreateRectRgn, DeleteObject};
+
+    if hwnd == 0 {
+        return false;
+    }
+    unsafe {
+        let region = CreateRectRgn(0, 0, -1, -1);
+        if region == 0 {
+            return false;
+        }
+        let blur = DWM_BLURBEHIND {
+            dwFlags: DWM_BB_ENABLE | DWM_BB_BLURREGION,
+            fEnable: 1,
+            hRgnBlur: region,
+            fTransitionOnMaximized: 0,
+        };
+        let result = DwmEnableBlurBehindWindow(hwnd, &blur);
+        DeleteObject(region);
+        result >= 0
+    }
+}
+
 /// How promising a window title is.
 ///
 /// `2` is the main window itself, `1` a plausible stand-in, `0` something that

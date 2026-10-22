@@ -25,6 +25,10 @@ windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_HiDpi",
+    # Deferred transparent viewports can lose their native transparency when
+    # glutin finalises them. `windows.rs` restores the DWM blur region.
+    "Win32_Graphics_Dwm",            # DwmEnableBlurBehindWindow
+    "Win32_Graphics_Gdi",            # CreateRectRgn/DeleteObject
     # The floating mark's own OLE drop target (`src/oledrop.rs`): a link
     # dragged from a browser carries text, not a file, and the window
     # manager's files-only target refuses it before the app hears about it.

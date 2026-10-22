@@ -524,7 +524,14 @@ impl RdmGuiApp {
                 }
                 TrayCommand::ToggleDropTarget => {
                     self.drop_target_shown = !self.drop_target_shown;
-                    self.settings.settings_mut().drop_target_enabled = self.drop_target_shown;
+                    // Settings keeps a live draft for its separate viewport.
+                    // Change that draft together with the store, or `collect`
+                    // will restore the previous value and the target appears to
+                    // switch itself back a moment later.
+                    self.settings_window.set_drop_target_enabled(
+                        &mut self.settings,
+                        self.drop_target_shown,
+                    );
                     if let Err(err) = self.settings.save() {
                         self.state
                             .push_log("error", format!("cannot save the setting: {err}"));

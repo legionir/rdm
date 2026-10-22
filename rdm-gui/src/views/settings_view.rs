@@ -265,19 +265,33 @@ impl SettingsWindow {
         self.collect(store, state)
     }
 
+    /// Apply a drop-target change made outside this window (the tray).
+    ///
+    /// The draft is a live editor and [`Self::collect`] copies it back into the
+    /// store. Updating only the store would therefore let an older draft undo
+    /// the tray command later in the very same frame. Keep both copies in step,
+    /// while leaving every other edit and the dirty flag untouched.
+    pub fn set_drop_target_enabled(&mut self, store: &mut SettingsStore, enabled: bool) {
+        store.settings_mut().drop_target_enabled = enabled;
+        if let Ok(mut shared) = self.shared.lock() {
+            shared.draft.drop_target_enabled = enabled;
+        }
+    }
+
     /// Synchronise the draft into the store and hand the queued actions to the
     /// app loop.
     fn collect(&mut self, store: &mut SettingsStore, state: &mut GuiState) -> Vec<UiAction> {
         let Ok(mut shared) = self.shared.lock() else {
             return Vec::new();
-        };
-        if shared.draft != *store.settings() {
-            *store.settings_mut() = shared.draft.clone();
-            shared.dirty = true;
         }
         if shared.seeded {
-            // Only write back once the window has really been filled; before
-            // that the fields hold nothing.
+            // A never-opened window still holds `AppSettings::default()`, not a
+            // draft of the user's settings. It must not overwrite the store (in
+            // particular after a tray command) before its first real seed.
+            if shared.draft != *store.settings() {
+                *store.settings_mut() = shared.draft.clone();
+                shared.dirty = true;
+            }
             state.data_dir_input = shared.data_dir_input.clone();
             state.settings_dirty = shared.dirty;
             self.tab = shared.tab;
@@ -657,6 +671,9 @@ mod tests {
     #[test]
     fn a_window_that_never_opened_leaves_the_view_model_alone() {
         let (_dir, mut store) = temp_store();
+        store.settings_mut().connections = 17;
+        store.settings_mut().drop_target_enabled = true;
+        let saved = store.settings().clone();
         let mut window = SettingsWindow::new();
         let mut state = GuiState::new(
             store.settings().to_request(),
@@ -670,6 +687,41 @@ mod tests {
             state.data_dir_input, before,
             "an unseeded window must not wipe the metadata field"
         );
+        assert_eq!(
+            store.settings(),
+            &saved,
+            "the default-initialised draft is not a copy of the user's settings"
+        );
+    }
+
+    #[test]
+    fn tray_drop_target_changes_survive_the_live_settings_draft() {
+        let (_dir, mut store) = temp_store();
+        let mut window = window_with(store.settings().clone());
+        let mut state = GuiState::new(
+            store.settings().to_request(),
+            store.path().display().to_string(),
+        );
+        // An unrelated unsaved edit must survive an external switch change.
+        window.shared.lock().unwrap().draft.connections = 12;
+        window.collect(&mut store, &mut state);
+        assert!(state.settings_dirty);
+
+        for enabled in [true, false] {
+            window.set_drop_target_enabled(&mut store, enabled);
+            // This is the collect that used to write the old draft straight
+            // back over the tray command in the same application frame.
+            window.collect(&mut store, &mut state);
+
+            assert_eq!(store.settings().drop_target_enabled, enabled);
+            assert_eq!(store.settings().connections, 12);
+            assert!(state.settings_dirty, "the unrelated edit stays unsaved");
+            assert_eq!(
+                window.shared.lock().unwrap().draft.drop_target_enabled,
+                enabled,
+                "the visible Settings switch follows the tray"
+            );
+        }
     }
 
     #[test]
