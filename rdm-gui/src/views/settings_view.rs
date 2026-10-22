@@ -283,7 +283,7 @@ impl SettingsWindow {
     fn collect(&mut self, store: &mut SettingsStore, state: &mut GuiState) -> Vec<UiAction> {
         let Ok(mut shared) = self.shared.lock() else {
             return Vec::new();
-        }
+        };
         if shared.seeded {
             // A never-opened window still holds `AppSettings::default()`, not a
             // draft of the user's settings. It must not overwrite the store (in

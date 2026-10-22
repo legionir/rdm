@@ -561,14 +561,28 @@ mod tests {
         let center = canvas.center();
         assert_eq!(center, egui::pos2(SIZE[0] * 0.5, SIZE[1] * 0.5));
         let radius = canvas.height().min(canvas.width()) * DIAMETER * 0.5;
-        let logo = egui::Rect::from_center_size(center, egui::Vec2::splat(radius * LOGO_SCALE));
-        assert_eq!(logo.center(), center, "the logo must not drift in the circle");
+        let logo =
+            egui::Rect::from_center_size(center, egui::Vec2::splat(radius * LOGO_SCALE));
+        assert_eq!(
+            logo.center(),
+            center,
+            "the logo must not drift in the circle"
+        );
 
         // The whole ring, including its two-point stroke, belongs inside the
         // fixed 52×52 native window rather than centred beyond an edge.
-        let ring = egui::Rect::from_center_size(center, egui::Vec2::splat((radius + 1.0) * 2.0));
-        for point in [ring.left_top(), ring.right_top(), ring.left_bottom(), ring.right_bottom()] {
-            assert!(canvas.contains(point), "ring point {point:?} escaped {canvas:?}");
+        let ring =
+            egui::Rect::from_center_size(center, egui::Vec2::splat((radius + 1.0) * 2.0));
+        for point in [
+            ring.left_top(),
+            ring.right_top(),
+            ring.left_bottom(),
+            ring.right_bottom(),
+        ] {
+            assert!(
+                canvas.contains(point),
+                "ring point {point:?} escaped {canvas:?}"
+            );
         }
     }
 
