@@ -101,13 +101,14 @@ pub async fn probe(client: &Client, url: &str) -> Result<Probe> {
         Err(_) => (content_length(&headers), accept_ranges_supported(&headers)),
     };
 
+    let disposition_filename = response_filename(&headers, &effective_url, url);
     Ok(Probe {
         effective_url,
         size,
         accept_ranges,
         etag: header_str(&headers, ETAG),
         last_modified: header_str(&headers, LAST_MODIFIED),
-        disposition_filename: response_filename(&headers, &effective_url, url),
+        disposition_filename,
     })
 }
 
@@ -123,13 +124,14 @@ async fn try_head(client: &Client, url: &str) -> Result<Option<Probe>> {
     }
     let headers = resp.headers().clone();
     let effective_url = resp.url().to_string();
+    let disposition_filename = response_filename(&headers, &effective_url, url);
     Ok(Some(Probe {
         effective_url,
         size: content_length(&headers),
         accept_ranges: accept_ranges_supported(&headers),
         etag: header_str(&headers, ETAG),
         last_modified: header_str(&headers, LAST_MODIFIED),
-        disposition_filename: response_filename(&headers, &effective_url, url),
+        disposition_filename,
     }))
 }
 
