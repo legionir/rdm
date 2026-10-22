@@ -25,8 +25,12 @@ pub enum Confirm {
     /// Nothing is discarded yet (queue drops, pause/resume) — act immediately
     /// and report the outcome.
     None,
-    /// Remove one download from the list.
+    /// Remove one completed download from the list; deleting its file is a
+    /// separate, explicit choice.
     RemoveOne,
+    /// Remove one unfinished download and its partial data. There is no
+    /// downloaded-file checkbox in this state.
+    RemoveIncomplete,
     /// Remove every completed download (bulk).
     RemoveCompleted,
     /// Download again from the beginning.
@@ -35,10 +39,14 @@ pub enum Confirm {
     DropAll,
 }
 
+/// The only checkbox that can delete a completed download's output file.
+pub const REMOVE_DOWNLOADED_FILE_CHECKBOX: &str = "Also delete the downloaded file.";
+
 impl Confirm {
-    pub const ALL: [Confirm; 5] = [
+    pub const ALL: [Confirm; 6] = [
         Confirm::None,
         Confirm::RemoveOne,
+        Confirm::RemoveIncomplete,
         Confirm::RemoveCompleted,
         Confirm::Restart,
         Confirm::DropAll,
@@ -48,7 +56,7 @@ impl Confirm {
     pub fn title(self) -> &'static str {
         match self {
             Confirm::None => "",
-            Confirm::RemoveOne => "Remove download",
+            Confirm::RemoveOne | Confirm::RemoveIncomplete => "Remove download",
             Confirm::RemoveCompleted => "Remove completed downloads",
             Confirm::Restart => "Restart from scratch",
             Confirm::DropAll => "Drop all queued downloads",
@@ -59,8 +67,7 @@ impl Confirm {
     pub fn confirm_label(self) -> &'static str {
         match self {
             Confirm::None => "",
-            Confirm::RemoveOne => "Remove",
-            Confirm::RemoveCompleted => "Remove",
+            Confirm::RemoveOne | Confirm::RemoveIncomplete | Confirm::RemoveCompleted => "Remove",
             Confirm::Restart => "Restart",
             Confirm::DropAll => "Drop them",
         }
@@ -70,13 +77,14 @@ impl Confirm {
     pub fn keep_label(self) -> &'static str {
         match self {
             Confirm::None => "",
-            Confirm::RemoveOne | Confirm::RemoveCompleted => "Keep",
+            Confirm::RemoveOne | Confirm::RemoveIncomplete | Confirm::RemoveCompleted => "Keep",
             Confirm::Restart => "Keep the progress",
             Confirm::DropAll => "Keep them",
         }
     }
 
-    /// Does the dialog offer "also delete the finished file"?
+    /// Does this state have a finished output file the user may explicitly
+    /// delete? Unfinished downloads never show this checkbox.
     pub fn has_file_checkbox(self) -> bool {
         matches!(self, Confirm::RemoveOne | Confirm::RemoveCompleted)
     }
@@ -85,13 +93,19 @@ impl Confirm {
     pub fn body(self, subject: usize) -> String {
         match self {
             Confirm::None => String::new(),
-            Confirm::RemoveOne => "This removes the download from the list and discards its \
-                 partial data. Tick the box to delete the finished file too. Cannot be undone."
+            Confirm::RemoveOne => format!(
+                "This removes the completed download from the list and discards any leftover \
+                 partial data. The downloaded file stays on disk unless you tick “{}” \
+                 Cannot be undone.",
+                REMOVE_DOWNLOADED_FILE_CHECKBOX
+            ),
+            Confirm::RemoveIncomplete => "This removes the unfinished download from the list \
+                 and discards its partial data. Cannot be undone."
                 .to_string(),
             Confirm::RemoveCompleted => format!(
-                "This removes {subject} completed download(s) from the list and discards their \
-                 partial data. The finished files stay on disk unless you tick the box below to \
-                 delete the finished file(s) as well. Cannot be undone."
+                "This removes {subject} completed download(s) from the list and discards any \
+                 leftover partial data. The downloaded files stay on disk unless you tick the \
+                 box below to delete them as well. Cannot be undone."
             ),
             Confirm::Restart => "This discards the progress of this download, downloads it again \
                  from the beginning and overwrites the file at the output path. Cannot be undone."
@@ -691,6 +705,7 @@ mod tests {
     fn confirmations_state_the_consequence_and_the_undo_status() {
         for confirm in [
             Confirm::RemoveOne,
+            Confirm::RemoveIncomplete,
             Confirm::RemoveCompleted,
             Confirm::Restart,
             Confirm::DropAll,
@@ -712,12 +727,23 @@ mod tests {
             assert!(body.contains("removes"), "{:?} names the action", confirm);
             assert!(body.contains("partial data"), "{:?} says what is lost", confirm);
             assert!(
-                body.contains("delete the finished file"),
-                "{:?} explains the file checkbox and its file consequence",
+                body.contains("downloaded file"),
+                "{:?} explains the downloaded-file consequence",
                 confirm
             );
             assert!(confirm.has_file_checkbox());
         }
+        let incomplete = Confirm::RemoveIncomplete.body(1);
+        assert!(incomplete.contains("partial data"));
+        assert!(!incomplete.contains(REMOVE_DOWNLOADED_FILE_CHECKBOX));
+        assert!(
+            !Confirm::RemoveIncomplete.has_file_checkbox(),
+            "an unfinished download has no completed file to offer for deletion"
+        );
+        assert_eq!(
+            REMOVE_DOWNLOADED_FILE_CHECKBOX,
+            "Also delete the downloaded file."
+        );
         let restart = Confirm::Restart.body(1);
         assert!(restart.contains("from the beginning"));
         assert!(restart.contains("overwrites"));
@@ -726,7 +752,12 @@ mod tests {
 
     #[test]
     fn the_safe_option_is_named_after_what_it_keeps() {
-        for confirm in [Confirm::RemoveOne, Confirm::RemoveCompleted, Confirm::Restart] {
+        for confirm in [
+            Confirm::RemoveOne,
+            Confirm::RemoveIncomplete,
+            Confirm::RemoveCompleted,
+            Confirm::Restart,
+        ] {
             let keep = confirm.keep_label().to_lowercase();
             assert!(
                 keep.starts_with("keep"),

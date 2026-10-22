@@ -120,7 +120,7 @@ vice versa.
 | `rdm list [--state …]` | Download table (full-width rows: click selects, double-click opens details) with search box and state filter |
 | `rdm info <ID>` | **Overview**, **Chunks** and **Events** tabs of the details modal |
 | `rdm info --json` | **JSON** tab of the details modal (with *Copy JSON*) |
-| `rdm remove <ID> [--purge]` | 🗑 row button (asks first; tick *also delete the finished file(s)*) and *Remove completed…* |
+| `rdm remove <ID> [--purge]` | 🗑 row button (asks first; a completed download offers *Also delete the downloaded file.*) and *Remove completed…*. Removing always discards partial data; without the file checkbox, the downloaded file stays on disk |
 | `--data-dir DIR` | `--data-dir` flag and the *Metadata directory* field in Settings |
 
 Beyond the CLI surface the window adds:

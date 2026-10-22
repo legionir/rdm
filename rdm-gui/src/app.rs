@@ -339,10 +339,23 @@ impl RdmGuiApp {
             }
             UiAction::AskRemove(id) => {
                 let label = self.describe(id);
+                let completed = self
+                    .state
+                    .downloads
+                    .iter()
+                    .find(|row| row.id == id)
+                    .is_some_and(|row| row.state == DownloadState::Completed);
                 if self.confirm_destructive() {
-                    self.state.pending_confirm = Some(PendingConfirm::Remove { id, label });
+                    self.state.pending_confirm = Some(PendingConfirm::Remove {
+                        id,
+                        label,
+                        completed,
+                    });
                 } else {
-                    let purge = self.settings.settings().purge_on_remove;
+                    // The file-deletion preference applies only to a finished
+                    // file. Removing an unfinished download always keeps the
+                    // output path untouched and discards only its partial data.
+                    let purge = completed && self.settings.settings().purge_on_remove;
                     self.report(self.backend.remove(id, purge));
                     self.refresh(true);
                 }
@@ -942,7 +955,8 @@ impl RdmGuiApp {
         let checkbox = confirm.has_file_checkbox();
         let palette = theme::palette_ctx(ctx);
         let spacing = Spacing::default();
-        let mut purge = self.settings.settings().purge_on_remove;
+        // A hidden checkbox must never contribute a remembered `true` value.
+        let mut purge = checkbox && self.settings.settings().purge_on_remove;
         let mut close = false;
         egui::Window::new(confirm.title())
             .collapsible(false)
@@ -956,7 +970,7 @@ impl RdmGuiApp {
                 components::banner(ui, &palette, components::Level::Warning, &confirm.body(pending.subject()));
                 if checkbox {
                     ui.add_space(spacing.sm);
-                    ui.checkbox(&mut purge, "also delete the finished file(s)");
+                    ui.checkbox(&mut purge, ux::REMOVE_DOWNLOADED_FILE_CHECKBOX);
                 }
                 ui.add_space(spacing.lg);
                 ui.horizontal(|ui| {

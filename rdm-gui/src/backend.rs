@@ -376,6 +376,10 @@ impl Backend {
     }
 
     /// `rdm remove <ID> [--purge]`
+    ///
+    /// Partial data is always discarded. `purge` is honoured only for a
+    /// completed download: an unfinished row must never lose an output file
+    /// through a remembered file-deletion preference.
     pub fn remove(&self, id: i64, purge: bool) -> Result<String> {
         let row = self.require(id)?;
         if row.state.active() {
@@ -384,29 +388,48 @@ impl Backend {
                 row.public_id
             );
         }
-        if purge {
-            let _ = std::fs::remove_file(&row.output_path);
-            let _ = std::fs::remove_file(sidecar_path(Path::new(&row.output_path)));
+
+        let delete_output = purge && row.state == DownloadState::Completed;
+        let output = Path::new(&row.output_path);
+        let file_already_gone = row.output_path.is_empty() || !output.exists();
+        if delete_output && !file_already_gone {
+            std::fs::remove_file(output).with_context(|| {
+                format!("cannot delete the downloaded file {}", output.display())
+            })?;
         }
-        // Distinguish “removed” from “removed, but the file had already gone”
-        // (or could not be deleted): a silent `let _ =` would report a deletion
-        // that did not happen.
-        let file_gone = row.output_path.is_empty()
-            || !Path::new(&row.output_path).exists();
+        if delete_output && !row.output_path.is_empty() {
+            // The sidecar is metadata, not the user's downloaded file. It is
+            // best-effort cleanup after the explicitly requested file deletion.
+            let _ = std::fs::remove_file(sidecar_path(output));
+        }
+
         if !row.chunk_dir.is_empty() {
-            let _ = std::fs::remove_dir_all(&row.chunk_dir);
+            match std::fs::remove_dir_all(&row.chunk_dir) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => {
+                    return Err(err).with_context(|| {
+                        format!(
+                            "cannot discard partial data in {}",
+                            row.chunk_dir
+                        )
+                    });
+                }
+            }
         }
         self.storage.delete_download(row.id)?;
-        Ok(format!(
-            "Removed {} ({}){}{}",
-            row.public_id,
-            row.filename,
-            if purge { " and deleted its finished file(s)" } else { "" },
-            if purge && file_gone {
-                " — the file was already gone"
+        let file_note = if delete_output {
+            if file_already_gone {
+                " — the downloaded file was already gone"
             } else {
-                ""
+                " and deleted the downloaded file"
             }
+        } else {
+            ""
+        };
+        Ok(format!(
+            "Removed {} ({}){}",
+            row.public_id, row.filename, file_note
         ))
     }
 
@@ -900,5 +923,76 @@ mod tests {
             backend.push_job(opts, "again".to_string()).is_ok(),
             "the de-duplication key must be released when a job is dropped"
         );
+    }
+
+    fn removable_download(
+        backend: &Backend,
+        state: DownloadState,
+    ) -> (i64, PathBuf, PathBuf) {
+        let root = backend.data_dir().join("removal");
+        let output = root.join("downloaded.bin");
+        let chunks = root.join("chunks");
+        std::fs::create_dir_all(&chunks).unwrap();
+        std::fs::write(&output, b"downloaded bytes").unwrap();
+        std::fs::write(chunks.join("chunk-0000.tmp"), b"partial bytes").unwrap();
+        let row = backend
+            .storage
+            .insert_download(
+                "https://example.invalid/removal.bin",
+                "downloaded.bin",
+                &output,
+                &chunks,
+                1,
+                1,
+                None,
+            )
+            .unwrap();
+        backend.storage.update_state(row.id, state, None).unwrap();
+        (row.id, output, chunks)
+    }
+
+    fn cleanup_backend(backend: Backend) {
+        let data_dir = backend.data_dir().to_path_buf();
+        drop(backend);
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn removing_completed_without_purge_keeps_file_and_discards_partial_data() {
+        let backend = backend();
+        let (id, output, chunks) = removable_download(&backend, DownloadState::Completed);
+        backend.remove(id, false).unwrap();
+        assert!(output.exists(), "the downloaded file must be kept");
+        assert!(!chunks.exists(), "partial data must be discarded");
+        assert!(backend.storage.get_download_by_id(id).unwrap().is_none());
+        cleanup_backend(backend);
+    }
+
+    #[test]
+    fn removing_completed_with_purge_deletes_file_and_partial_data() {
+        let backend = backend();
+        let (id, output, chunks) = removable_download(&backend, DownloadState::Completed);
+        let sidecar = sidecar_path(&output);
+        std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+        std::fs::write(&sidecar, b"{}").unwrap();
+        backend.remove(id, true).unwrap();
+        assert!(!output.exists(), "the explicitly purged file must be deleted");
+        assert!(!sidecar.exists(), "its sidecar is cleaned up too");
+        assert!(!chunks.exists(), "partial data must be discarded");
+        assert!(backend.storage.get_download_by_id(id).unwrap().is_none());
+        cleanup_backend(backend);
+    }
+
+    #[test]
+    fn removing_unfinished_never_purges_output_but_always_discards_partial_data() {
+        let backend = backend();
+        let (id, output, chunks) = removable_download(&backend, DownloadState::Paused);
+        // Deliberately pass true: even a stale preference must not delete an
+        // output path when there is no completed downloaded file.
+        backend.remove(id, true).unwrap();
+        assert!(output.exists(), "purge is not offered for unfinished downloads");
+        assert!(!chunks.exists(), "partial data must still be discarded");
+        assert!(backend.storage.get_download_by_id(id).unwrap().is_none());
+        cleanup_backend(backend);
     }
 }

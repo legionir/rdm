@@ -85,7 +85,7 @@ REQUIRED_COPY = [
     ("rdm-gui/src/ux.rs", "removes", "the remove copy names the action"),
     ("rdm-gui/src/ux.rs", "partial data", "the remove copy says what is discarded"),
     ("rdm-gui/src/ux.rs", "Cannot be undone", "destructive copy states the undo status"),
-    ("rdm-gui/src/ux.rs", "delete the finished file", "the remove copy explains the file checkbox"),
+    ("rdm-gui/src/ux.rs", "Also delete the downloaded file.", "the remove copy explains the file checkbox"),
     ("rdm-gui/src/ux.rs", "from the beginning", "the restart copy says the progress is discarded"),
 ]
 # Confirmations must be wired to the actions, not only written down.
