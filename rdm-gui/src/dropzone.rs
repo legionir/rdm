@@ -368,7 +368,7 @@ impl DropZone {
         });
     }
 
-    fn ui(&self, ctx: &egui::Context, _class: ViewportClass, anchor: Option<[f32; 2]>) {
+    fn ui(&self, ctx: &egui::Context, _class: ViewportClass, _anchor: Option<[f32; 2]>) {
         let dark = self.dark.load(Ordering::Relaxed);
         theme::install(ctx, dark);
         let palette = theme::palette_ctx(ctx);
@@ -380,7 +380,11 @@ impl DropZone {
 
         let dragging = self.hover.load(Ordering::Relaxed);
 
-        if let Some(position) = anchor {
+        // On Windows the native handle is positioned with its actual outer
+        // size and DPI in `ensure_target`; sending the initial egui position
+        // again here would fight that physical-pixel correction.
+        #[cfg(not(target_os = "windows"))]
+        if let Some(position) = _anchor {
             // Keep the target anchored even after a DPI or taskbar change.
             let current = ctx.input(|i| i.viewport().outer_rect.map(|r| r.min));
             if current.map(|c| [c.x, c.y]) != Some(position) {
@@ -434,18 +438,26 @@ impl DropZone {
     /// eframe does not expose a viewport's native handle.
     #[cfg(target_os = "windows")]
     fn ensure_target(&self, ctx: &egui::Context) {
-        if self.target_refused.load(Ordering::Relaxed) {
-            return;
-        }
         let known = self.target_hwnd.load(Ordering::Relaxed);
-        let hwnd = if known != 0 && crate::windows::is_window(known) {
-            return; // already installed on this very window
+        let installed = known != 0 && crate::windows::is_window(known);
+        let hwnd = if installed {
+            known
         } else {
             match crate::windows::drop_target_window() {
                 Some(hwnd) => hwnd,
                 None => return, // the window is not created yet
             }
         };
+
+        // Keep the whole native outer viewport in the usable desktop area.
+        // This must run even after OLE installation, and even if OLE was
+        // refused: taskbar visibility and DPI can change during the session.
+        if !crate::windows::keep_drop_target_in_work_area(hwnd, MARGIN) {
+            tracing::debug!("drop target: Windows refused work-area positioning");
+        }
+        if installed || self.target_refused.load(Ordering::Relaxed) {
+            return;
+        }
 
         if !crate::windows::enable_drop_target_transparency(hwnd) {
             // The mark still works on a desktop without DWM composition; the

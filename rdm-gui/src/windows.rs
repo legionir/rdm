@@ -4,8 +4,10 @@
 //!
 //! 1. *Where* the floating drop target should sit so it floats just above the
 //!    clock area of the taskbar. On Windows that is the primary monitor's work
-//!    area (the desktop rectangle that excludes the taskbar), reported in
-//!    physical pixels and converted to egui points with the system DPI.
+//!    area, additionally clipped by the visible taskbar (an auto-hidden
+//!    taskbar is not always subtracted from the work area). The final native
+//!    placement uses the target's actual outer size and window DPI, so no part
+//!    of the viewport can be left below the taskbar by a points/pixels mix-up.
 //!    Everywhere else the caller falls back to the monitor size from egui,
 //!    minus a margin.
 //! 2. A window handle that can bring the main window back **without the app
@@ -43,42 +45,203 @@
 
 /// Bottom-right anchor for a window of `size_pts`, in egui points.
 ///
-/// `None` means “this platform has no work-area query” — the caller then uses
-/// the monitor size instead of guessing.
+/// This is the initial position, before the deferred viewport has a native
+/// handle. Once it exists, [`keep_drop_target_in_work_area`] repeats the
+/// calculation with its real outer size and DPI.
 #[cfg(target_os = "windows")]
 pub fn bottom_right_anchor(size_pts: [f32; 2], margin_pts: f32) -> Option<[f32; 2]> {
-    use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::UI::HiDpi::GetDpiForSystem;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETWORKAREA};
 
-    let mut rect = RECT {
-        left: 0,
-        top: 0,
-        right: 0,
-        bottom: 0,
-    };
-    // 0 == no update flags: read the value, do not broadcast anything.
-    let ok = unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut rect as *mut _ as *mut _, 0) };
-    if ok == 0 {
-        return None;
-    }
+    let work_area = primary_work_area()?;
     let dpi = unsafe { GetDpiForSystem() } as f32;
-    let scale = if dpi > 0.0 { dpi / 96.0 } else { 1.0 };
-    let mut pos = [
-        (rect.right as f32) / scale - size_pts[0] - margin_pts,
-        (rect.bottom as f32) / scale - size_pts[1] - margin_pts,
-    ];
-    // A monitor to the left of the primary has negative coordinates; never
-    // place the window off-screen on the top-left edge.
-    pos[0] = pos[0].max(0.0);
-    pos[1] = pos[1].max(0.0);
-    Some(pos)
+    let scale = valid_scale(dpi / 96.0);
+    let size_px = size_pts.map(|size| (size.max(0.0) * scale).ceil() as i32);
+    let margin_px = (margin_pts.max(0.0) * scale).ceil() as i32;
+    let position = bottom_right_pixel_anchor(
+        work_area,
+        visible_taskbar_rect(),
+        size_px,
+        margin_px,
+    );
+    Some([
+        position[0] as f32 / scale,
+        position[1] as f32 / scale,
+    ])
 }
 
 /// No work-area query on this platform.
 #[cfg(not(target_os = "windows"))]
 pub fn bottom_right_anchor(_size_pts: [f32; 2], _margin_pts: f32) -> Option<[f32; 2]> {
     None
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn valid_scale(scale: f32) -> f32 {
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    }
+}
+
+/// The primary monitor's work area in physical screen coordinates.
+///
+/// Unlike `SystemParametersInfoW(SPI_GETWORKAREA)`, this monitor query is
+/// suitable for the per-monitor-DPI-aware window that winit creates.
+#[cfg(target_os = "windows")]
+fn primary_work_area() -> Option<windows_sys::Win32::Foundation::RECT> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
+    };
+
+    let monitor = unsafe {
+        MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY)
+    };
+    if monitor == 0 {
+        return None;
+    }
+    let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    let ok = unsafe { GetMonitorInfoW(monitor, &mut info) };
+    (ok != 0).then_some(info.rcWork)
+}
+
+/// The visible primary taskbar, including one that is currently auto-hidden.
+///
+/// Windows may leave an auto-hidden taskbar inside the reported work area.
+/// Reserving its actual rectangle as well prevents the target from being
+/// covered when the taskbar is shown, without changing normal work-area
+/// behaviour.
+#[cfg(target_os = "windows")]
+fn visible_taskbar_rect() -> Option<windows_sys::Win32::Foundation::RECT> {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, GetWindowRect, IsWindowVisible,
+    };
+
+    let class: Vec<u16> = "Shell_TrayWnd\0".encode_utf16().collect();
+    let hwnd = unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) };
+    if hwnd == 0 || unsafe { IsWindowVisible(hwnd) } == 0 {
+        return None;
+    }
+    let mut rect: RECT = unsafe { std::mem::zeroed() };
+    let ok = unsafe { GetWindowRect(hwnd, &mut rect) };
+    (ok != 0).then_some(rect)
+}
+
+/// Reserve the screen edge occupied by a taskbar.
+///
+/// With auto-hide, `work_area` can still be the whole monitor. Normal
+/// taskbars already end exactly at the work-area edge and therefore make no
+/// further change. Horizontal and vertical taskbars are handled separately
+/// so a full-width bottom taskbar does not accidentally clip the side too.
+#[cfg(any(target_os = "windows", test))]
+fn work_area_without_taskbar(
+    mut work_area: windows_sys::Win32::Foundation::RECT,
+    taskbar: Option<windows_sys::Win32::Foundation::RECT>,
+) -> windows_sys::Win32::Foundation::RECT {
+    let Some(bar) = taskbar else {
+        return work_area;
+    };
+    let overlaps_x = bar.right > work_area.left && bar.left < work_area.right;
+    let overlaps_y = bar.bottom > work_area.top && bar.top < work_area.bottom;
+    if !overlaps_x || !overlaps_y {
+        return work_area;
+    }
+
+    let width = (bar.right - bar.left).max(0);
+    let height = (bar.bottom - bar.top).max(0);
+    if width >= height {
+        if bar.top <= work_area.top && bar.bottom > work_area.top {
+            work_area.top = work_area.top.max(bar.bottom);
+        }
+        if bar.bottom >= work_area.bottom && bar.top < work_area.bottom {
+            work_area.bottom = work_area.bottom.min(bar.top);
+        }
+        if work_area.bottom < work_area.top {
+            work_area.bottom = work_area.top;
+        }
+    } else {
+        if bar.left <= work_area.left && bar.right > work_area.left {
+            work_area.left = work_area.left.max(bar.right);
+        }
+        if bar.right >= work_area.right && bar.left < work_area.right {
+            work_area.right = work_area.right.min(bar.left);
+        }
+        if work_area.right < work_area.left {
+            work_area.right = work_area.left;
+        }
+    }
+    work_area
+}
+
+/// Compute a physical-pixel position that fits the whole outer window.
+#[cfg(any(target_os = "windows", test))]
+fn bottom_right_pixel_anchor(
+    work_area: windows_sys::Win32::Foundation::RECT,
+    taskbar: Option<windows_sys::Win32::Foundation::RECT>,
+    outer_size_px: [i32; 2],
+    margin_px: i32,
+) -> [i32; 2] {
+    let area = work_area_without_taskbar(work_area, taskbar);
+    let width = outer_size_px[0].max(0);
+    let height = outer_size_px[1].max(0);
+    let margin = margin_px.max(0);
+    [
+        (area.right - width - margin).max(area.left),
+        (area.bottom - height - margin).max(area.top),
+    ]
+}
+
+/// Keep the native drop-target viewport completely above the taskbar.
+///
+/// egui positions are logical points, while Win32 window and monitor rectangles
+/// are physical pixels. Doing the final placement here avoids converting the
+/// work area with the system DPI and then accidentally applying it at the
+/// target window's (possibly different) DPI. `GetWindowRect` also supplies the
+/// real outer size rather than assuming it equals the fixed inner size.
+#[cfg(target_os = "windows")]
+pub fn keep_drop_target_in_work_area(hwnd: isize, margin_pts: f32) -> bool {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+    };
+
+    if hwnd == 0 {
+        return false;
+    }
+    let mut outer: RECT = unsafe { std::mem::zeroed() };
+    if unsafe { GetWindowRect(hwnd, &mut outer) } == 0 {
+        return false;
+    }
+    let Some(work_area) = primary_work_area() else {
+        return false;
+    };
+    let dpi = unsafe { GetDpiForWindow(hwnd) } as f32;
+    let scale = valid_scale(dpi / 96.0);
+    let margin_px = (margin_pts.max(0.0) * scale).ceil() as i32;
+    let position = bottom_right_pixel_anchor(
+        work_area,
+        visible_taskbar_rect(),
+        [outer.right - outer.left, outer.bottom - outer.top],
+        margin_px,
+    );
+    if [outer.left, outer.top] == position {
+        return true;
+    }
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            0,
+            position[0],
+            position[1],
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        ) != 0
+    }
 }
 
 // ---------------------------------------------------------------- window -----
@@ -508,6 +671,16 @@ pub fn reveal_main_window() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows_sys::Win32::Foundation::RECT;
+
+    fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
+        RECT {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
 
     #[test]
     fn an_unknown_handle_is_a_refusal_not_a_guess() {
@@ -564,6 +737,48 @@ mod tests {
         assert_eq!(title_rank("Some other window"), 1);
         assert!(title_rank("RDM") > title_rank("Some other window"));
         assert!(title_rank("Some other window") > title_rank("rdm — Help"));
+    }
+
+    #[test]
+    fn a_visible_taskbar_is_reserved_even_when_the_work_area_includes_it() {
+        let taskbar = rect(0, 1032, 1920, 1080);
+        let normal_work_area = rect(0, 0, 1920, 1032);
+        // This is the auto-hide case that used to put the bottom half of the
+        // target behind the taskbar: the work area still ends at the screen.
+        let auto_hide_work_area = rect(0, 0, 1920, 1080);
+
+        for work_area in [normal_work_area, auto_hide_work_area] {
+            let position =
+                bottom_right_pixel_anchor(work_area, Some(taskbar), [52, 52], 10);
+            assert_eq!(position, [1858, 970]);
+            assert_eq!(position[0] + 52 + 10, 1920);
+            assert_eq!(position[1] + 52 + 10, taskbar.top);
+        }
+    }
+
+    #[test]
+    fn a_vertical_taskbar_reserves_the_side_without_clipping_the_bottom() {
+        let work_area = rect(0, 0, 1920, 1080);
+        let taskbar = rect(1848, 0, 1920, 1080);
+        let position = bottom_right_pixel_anchor(work_area, Some(taskbar), [52, 52], 10);
+        assert_eq!(position, [1786, 1018]);
+        assert_eq!(position[0] + 52 + 10, taskbar.left);
+        assert_eq!(position[1] + 52 + 10, work_area.bottom);
+    }
+
+    #[test]
+    fn physical_outer_size_and_margin_both_fit_above_the_taskbar() {
+        // A 52 pt viewport at 150% DPI has a 78 physical-pixel outer size;
+        // its 10 pt margin is 15 px. Subtracting the unscaled 52+10 here is
+        // the DPI mix-up that the native final placement must avoid.
+        let work_area = rect(0, 0, 2560, 1440);
+        let taskbar = rect(0, 1392, 2560, 1440);
+        let position = bottom_right_pixel_anchor(work_area, Some(taskbar), [78, 78], 15);
+        assert_eq!(position, [2467, 1299]);
+        assert!(position[0] >= work_area.left);
+        assert!(position[1] >= work_area.top);
+        assert_eq!(position[0] + 78 + 15, work_area.right);
+        assert_eq!(position[1] + 78 + 15, taskbar.top);
     }
 
     #[test]
