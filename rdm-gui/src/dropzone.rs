@@ -68,6 +68,16 @@ const LOGO_SCALE: f32 = 1.26;
 /// cell). 32 keeps the glyph crisp at ~29 pt and costs 4096 vertices a frame.
 const LOGO_GRID: usize = 32;
 
+/// The fixed drawing canvas of the native window.
+///
+/// Do not derive this from a layout's remaining size: allocation can align a
+/// desired rect inside a larger response and reserves item spacing around it.
+/// The native viewport is fixed at [`SIZE`], so its mark must use those same
+/// coordinates to stay centred instead of drifting towards an edge.
+fn target_canvas() -> egui::Rect {
+    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(SIZE[0], SIZE[1]))
+}
+
 /// What a finished drop carried, in the order the drop sources offer it.
 ///
 /// Deliberately dumb: no interpretation happens here, so every “what does this
@@ -358,7 +368,7 @@ impl DropZone {
         });
     }
 
-    fn ui(&self, ctx: &egui::Context, _class: ViewportClass, anchor: Option<[f32; 2]>) {
+    fn ui(&self, ctx: &egui::Context, _class: ViewportClass, _anchor: Option<[f32; 2]>) {
         let dark = self.dark.load(Ordering::Relaxed);
         theme::install(ctx, dark);
         let palette = theme::palette_ctx(ctx);
@@ -370,7 +380,11 @@ impl DropZone {
 
         let dragging = self.hover.load(Ordering::Relaxed);
 
-        if let Some(position) = anchor {
+        // On Windows the native handle is positioned with its actual outer
+        // size and DPI in `ensure_target`; sending the initial egui position
+        // again here would fight that physical-pixel correction.
+        #[cfg(not(target_os = "windows"))]
+        if let Some(position) = _anchor {
             // Keep the target anchored even after a DPI or taskbar change.
             let current = ctx.input(|i| i.viewport().outer_rect.map(|r| r.min));
             if current.map(|c| [c.x, c.y]) != Some(position) {
@@ -384,8 +398,11 @@ impl DropZone {
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
-                let (rect, response) =
-                    ui.allocate_exact_size(ui.available_size(), Sense::hover());
+                // Allocate the native window's fixed canvas itself. Using the
+                // remaining layout size here could centre the circle in a
+                // different rect and clip it against the actual window.
+                let rect = target_canvas();
+                let response = ui.allocate_rect(rect, Sense::hover());
                 let center = rect.center();
                 let radius = rect.height().min(rect.width()) * DIAMETER * 0.5;
 
@@ -421,18 +438,32 @@ impl DropZone {
     /// eframe does not expose a viewport's native handle.
     #[cfg(target_os = "windows")]
     fn ensure_target(&self, ctx: &egui::Context) {
-        if self.target_refused.load(Ordering::Relaxed) {
-            return;
-        }
         let known = self.target_hwnd.load(Ordering::Relaxed);
-        let hwnd = if known != 0 && crate::windows::is_window(known) {
-            return; // already installed on this very window
+        let installed = known != 0 && crate::windows::is_window(known);
+        let hwnd = if installed {
+            known
         } else {
             match crate::windows::drop_target_window() {
                 Some(hwnd) => hwnd,
                 None => return, // the window is not created yet
             }
         };
+
+        // Keep the whole native outer viewport in the usable desktop area.
+        // This must run even after OLE installation, and even if OLE was
+        // refused: taskbar visibility and DPI can change during the session.
+        if !crate::windows::keep_drop_target_in_work_area(hwnd, MARGIN) {
+            tracing::debug!("drop target: Windows refused work-area positioning");
+        }
+        if installed || self.target_refused.load(Ordering::Relaxed) {
+            return;
+        }
+
+        if !crate::windows::enable_drop_target_transparency(hwnd) {
+            // The mark still works on a desktop without DWM composition; the
+            // warning simply makes an opaque background diagnosable.
+            tracing::warn!("drop target: Windows refused native transparency");
+        }
 
         let hover = Arc::clone(&self.hover);
         let wake = ctx.clone();
@@ -531,6 +562,40 @@ mod tests {
             LOGO_SCALE * 0.5 < 0.85,
             "the mark would grow over the ring at LOGO_SCALE {LOGO_SCALE}"
         );
+    }
+
+    #[test]
+    fn the_circle_and_logo_share_the_exact_window_centre() {
+        let canvas = target_canvas();
+        assert_eq!(canvas.min, egui::Pos2::ZERO);
+        assert_eq!(canvas.size(), egui::vec2(SIZE[0], SIZE[1]));
+
+        let center = canvas.center();
+        assert_eq!(center, egui::pos2(SIZE[0] * 0.5, SIZE[1] * 0.5));
+        let radius = canvas.height().min(canvas.width()) * DIAMETER * 0.5;
+        let logo =
+            egui::Rect::from_center_size(center, egui::Vec2::splat(radius * LOGO_SCALE));
+        assert_eq!(
+            logo.center(),
+            center,
+            "the logo must not drift in the circle"
+        );
+
+        // The whole ring, including its two-point stroke, belongs inside the
+        // fixed 52×52 native window rather than centred beyond an edge.
+        let ring =
+            egui::Rect::from_center_size(center, egui::Vec2::splat((radius + 1.0) * 2.0));
+        for point in [
+            ring.left_top(),
+            ring.right_top(),
+            ring.left_bottom(),
+            ring.right_bottom(),
+        ] {
+            assert!(
+                canvas.contains(point),
+                "ring point {point:?} escaped {canvas:?}"
+            );
+        }
     }
 
     #[test]

@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use egui::Context;
 
+use rdm::browser::{BrowserBridge, BrowserRequest};
 use rdm::models::DownloadState;
 
 use crate::backend::{Backend, BackendEvent};
@@ -66,6 +67,11 @@ pub struct RdmGuiApp {
     tray: Option<Tray>,
     /// Links arriving from the tray or the drop target.
     imports: ImportBus,
+    /// Native-messaging requests arriving from Chrome/Firefox.
+    browser: Option<BrowserBridge>,
+    /// Last bridge error already shown, so a filesystem failure cannot spam
+    /// the app log on every frame.
+    browser_error: Option<String>,
     /// The floating drop target (“floating bottom”).
     drop_zone: DropZone,
     /// Set while the drop target should be on screen, mirrored into the settings.
@@ -98,6 +104,13 @@ impl RdmGuiApp {
             data_dir.display().to_string(),
         );
         let drop_target_shown = settings.settings().drop_target_enabled;
+        let (browser, browser_error) = match BrowserBridge::new() {
+            Ok(bridge) => (Some(bridge), None),
+            Err(err) => (
+                None,
+                Some(format!("browser integration is unavailable: {err}")),
+            ),
+        };
         let mut app = RdmGuiApp {
             backend,
             settings,
@@ -112,6 +125,8 @@ impl RdmGuiApp {
             shutting_down: false,
             tray: None,
             imports: ImportBus::new(),
+            browser,
+            browser_error,
             drop_zone: DropZone::new(),
             drop_target_shown,
             quit_requested: false,
@@ -132,6 +147,9 @@ impl RdmGuiApp {
             "info",
             format!("metadata database: {}", app.backend.db_path().display()),
         );
+        if let Some(error) = app.browser_error.clone() {
+            app.state.push_log("error", error);
+        }
         // Where to look after a report about the tray: the file keeps every
         // line, including the ones the tray relays write from their threads.
         // (`app.logging`: the parameter was moved into the app above.)
@@ -301,6 +319,10 @@ impl RdmGuiApp {
                     }
                 }
             }
+            UiAction::SubmitLinkSelection => self.submit_link_selection(),
+            UiAction::CancelLinkSelection => {
+                self.state.link_selection = None;
+            }
             UiAction::Pause(id) => self.report(self.backend.pause(id)),
             UiAction::Cancel(id) => self.report(self.backend.cancel(id)),
             UiAction::Resume(id) => {
@@ -317,10 +339,23 @@ impl RdmGuiApp {
             }
             UiAction::AskRemove(id) => {
                 let label = self.describe(id);
+                let completed = self
+                    .state
+                    .downloads
+                    .iter()
+                    .find(|row| row.id == id)
+                    .is_some_and(|row| row.state == DownloadState::Completed);
                 if self.confirm_destructive() {
-                    self.state.pending_confirm = Some(PendingConfirm::Remove { id, label });
+                    self.state.pending_confirm = Some(PendingConfirm::Remove {
+                        id,
+                        label,
+                        completed,
+                    });
                 } else {
-                    let purge = self.settings.settings().purge_on_remove;
+                    // The file-deletion preference applies only to a finished
+                    // file. Removing an unfinished download always keeps the
+                    // output path untouched and discards only its partial data.
+                    let purge = completed && self.settings.settings().purge_on_remove;
                     self.report(self.backend.remove(id, purge));
                     self.refresh(true);
                 }
@@ -524,7 +559,14 @@ impl RdmGuiApp {
                 }
                 TrayCommand::ToggleDropTarget => {
                     self.drop_target_shown = !self.drop_target_shown;
-                    self.settings.settings_mut().drop_target_enabled = self.drop_target_shown;
+                    // Settings keeps a live draft for its separate viewport.
+                    // Change that draft together with the store, or `collect`
+                    // will restore the previous value and the target appears to
+                    // switch itself back a moment later.
+                    self.settings_window.set_drop_target_enabled(
+                        &mut self.settings,
+                        self.drop_target_shown,
+                    );
                     if let Err(err) = self.settings.save() {
                         self.state
                             .push_log("error", format!("cannot save the setting: {err}"));
@@ -559,6 +601,66 @@ impl RdmGuiApp {
         // The menu check mark follows the setting, whatever changed it.
         if let Some(tray) = &self.tray {
             tray.set_drop_target_shown(self.drop_target_shown);
+        }
+    }
+
+    /// Requests queued by `rdm-native-host`.  The bridge is independent of the
+    /// metadata directory, so this also works with a custom `--data-dir`.
+    fn drain_browser_requests(&mut self) {
+        let requests = {
+            let Some(bridge) = self.browser.as_mut() else {
+                return;
+            };
+            match bridge.poll() {
+                Ok(requests) => requests,
+                Err(err) => {
+                    let error = format!("cannot read browser requests: {err}");
+                    if self.browser_error.as_deref() != Some(error.as_str()) {
+                        self.state.push_log("error", error.clone());
+                        self.browser_error = Some(error);
+                    }
+                    return;
+                }
+            }
+        };
+        self.browser_error = None;
+
+        for request in requests {
+            match request {
+                Ok(BrowserRequest::OpenNew { url }) => {
+                    self.state.link_selection = None;
+                    self.state
+                        .push_log("info", "Browser link received — opening New download");
+                    self.open_new_download(Some(url));
+                }
+                Ok(BrowserRequest::SelectLinks { links }) => {
+                    self.state.show_add = false;
+                    self.state.form_error = None;
+                    let count = links.len();
+                    let selection = self.state.link_selection.get_or_insert_with(|| {
+                        crate::state::LinkSelection {
+                            links: Vec::new(),
+                            error: None,
+                        }
+                    });
+                    for link in links {
+                        if !selection.links.iter().any(|item| item.url == link.url) {
+                            selection.links.push(crate::state::LinkSelectionItem {
+                                url: link.url,
+                                label: link.label,
+                                checked: true,
+                            });
+                        }
+                    }
+                    selection.error = None;
+                    self.reveal_requested = true;
+                    self.state.push_log(
+                        "info",
+                        format!("Browser sent {count} page link(s) — select and press OK"),
+                    );
+                }
+                Err(error) => self.state.push_log("error", error),
+            }
         }
     }
 
@@ -601,6 +703,77 @@ impl RdmGuiApp {
         self.state.show_add = true;
         self.state.focus_url = true;
         self.reveal_requested = true;
+    }
+
+    /// Add only the checked browser links, using the current Settings values
+    /// as the defaults for every transfer.
+    fn submit_link_selection(&mut self) {
+        let selected: Vec<String> = self
+            .state
+            .link_selection
+            .as_ref()
+            .map(|selection| {
+                selection
+                    .links
+                    .iter()
+                    .filter(|item| item.checked)
+                    .map(|item| item.url.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if selected.is_empty() {
+            if let Some(selection) = self.state.link_selection.as_mut() {
+                selection.error = Some("Select at least one link, or press Cancel.".into());
+            }
+            return;
+        }
+
+        let defaults = self.settings.settings().to_request();
+        let limit = self.max_concurrent();
+        let mut succeeded = std::collections::HashSet::new();
+        let mut failures = Vec::new();
+        for url in selected {
+            let mut request = defaults.clone();
+            request.url = url.clone();
+            match self.backend.start_download(&request, limit) {
+                Ok(_) => {
+                    succeeded.insert(url);
+                }
+                Err(err) => failures.push(format!("{url}: {err:#}")),
+            }
+        }
+
+        if let Some(selection) = self.state.link_selection.as_mut() {
+            // A retry must not enqueue successful items a second time.  Keep
+            // failures checked and preserve rows the user had left unchecked.
+            selection.links.retain(|item| !succeeded.contains(&item.url));
+            selection.error = if failures.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "{} link(s) could not be added. First error: {}",
+                    failures.len(),
+                    failures[0]
+                ))
+            };
+        }
+        if failures.is_empty() {
+            self.state.link_selection = None;
+            self.state.push_log(
+                "info",
+                format!("queued {} browser download(s)", succeeded.len()),
+            );
+        } else {
+            self.state.push_log(
+                "error",
+                format!(
+                    "queued {} browser download(s); {} failed",
+                    succeeded.len(),
+                    failures.len()
+                ),
+            );
+        }
+        self.refresh(true);
     }
 
     /// Keep the floating drop target on screen while the setting is on.
@@ -708,6 +881,8 @@ impl RdmGuiApp {
     fn close_overlay(&mut self) {
         if self.state.show_help {
             self.state.show_help = false;
+        } else if self.state.link_selection.is_some() {
+            self.state.link_selection = None;
         } else if self.state.show_add {
             self.state.show_add = false;
             self.state.form_error = None;
@@ -780,7 +955,8 @@ impl RdmGuiApp {
         let checkbox = confirm.has_file_checkbox();
         let palette = theme::palette_ctx(ctx);
         let spacing = Spacing::default();
-        let mut purge = self.settings.settings().purge_on_remove;
+        // A hidden checkbox must never contribute a remembered `true` value.
+        let mut purge = checkbox && self.settings.settings().purge_on_remove;
         let mut close = false;
         egui::Window::new(confirm.title())
             .collapsible(false)
@@ -794,7 +970,7 @@ impl RdmGuiApp {
                 components::banner(ui, &palette, components::Level::Warning, &confirm.body(pending.subject()));
                 if checkbox {
                     ui.add_space(spacing.sm);
-                    ui.checkbox(&mut purge, "also delete the finished file(s)");
+                    ui.checkbox(&mut purge, ux::REMOVE_DOWNLOADED_FILE_CHECKBOX);
                 }
                 ui.add_space(spacing.lg);
                 ui.horizontal(|ui| {
@@ -873,6 +1049,7 @@ impl eframe::App for RdmGuiApp {
         self.drain_backend_events();
         self.drain_engine_logs();
         self.poll_tray(ctx);
+        self.drain_browser_requests();
         self.drain_imports(ctx);
         self.sync_drop_target(ctx);
         let wanted_level = self.settings.settings().log_level.clone();
@@ -958,6 +1135,7 @@ impl eframe::App for RdmGuiApp {
             &db_path,
         ));
         actions.extend(crate::views::add_download::show(ctx, &mut self.state));
+        actions.extend(crate::views::link_selection::show(ctx, &mut self.state));
         actions.extend(crate::views::details_modal::show(ctx, &mut self.state));
         actions.extend(crate::views::help_overlay::show(ctx, &mut self.state));
         actions.extend(self.confirm_dialog(ctx));

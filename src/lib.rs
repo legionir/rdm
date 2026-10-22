@@ -10,6 +10,7 @@
 //! * [`utils`] — formatting, path safety, rate limiting.
 //! * [`console`] — terminal progress rendering.
 
+pub mod browser;
 pub mod cli;
 pub mod console;
 pub mod downloader;

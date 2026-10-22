@@ -94,16 +94,36 @@ jobs:
           printf '::error title=gui tests (exit %s)::%s\n' "$status" \
             "$(printf '%s' "$out" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
 
-      - name: Stage GUI binary
+      - name: Test browser extension
+        run: node --test browser-extension/tests/*.test.js
+      - name: Build browser extension packages
+        run: python browser-extension/build.py
+      - name: Build native messaging host
+        run: cargo build --release --bin rdm-native-host
+      - name: Stage GUI and browser integration
         shell: bash
         run: |
-          mkdir -p dist
+          mkdir -p dist/browser-bundle/extension
           cp rdm-gui/target/release/rdm-gui.exe dist/rdm-gui-windows-x86_64.exe
+          cp rdm-gui/target/release/rdm-gui.exe dist/browser-bundle/rdm-gui.exe
+          cp target/release/rdm-native-host.exe dist/browser-bundle/rdm-native-host.exe
+          cp browser-extension/install-windows.ps1 dist/browser-bundle/install-windows.ps1
+          cp browser-extension/README.md dist/browser-bundle/BROWSER-INTEGRATION.md
+          cp -r browser-extension/dist/chrome dist/browser-bundle/extension/chrome
+          cp -r browser-extension/dist/firefox dist/browser-bundle/extension/firefox
+          python -c "import shutil; shutil.make_archive('dist/rdm-browser-integration-windows', 'zip', 'dist/browser-bundle')"
+          rm -rf dist/browser-bundle
       - name: Upload GUI artifact
         uses: actions/upload-artifact@v4
         with:
           name: rdm-gui-windows-x86_64.exe
           path: dist/rdm-gui-windows-x86_64.exe
+          if-no-files-found: error
+      - name: Upload browser integration artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdm-browser-integration-windows
+          path: dist/rdm-browser-integration-windows.zip
           if-no-files-found: error
 
   release:
@@ -133,6 +153,11 @@ jobs:
         with:
           name: rdm-gui-windows-x86_64.exe
           path: dist
+      - name: Download browser integration artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rdm-browser-integration-windows
+          path: dist
       - name: Publish release
         env:
           # gh authenticates from GH_TOKEN; the job-level `contents: write`
@@ -142,15 +167,16 @@ jobs:
           set -euo pipefail
           ls -la dist
           test -f dist/rdm-gui-windows-x86_64.exe
+          test -f dist/rdm-browser-integration-windows.zip
           TAG="${GITHUB_REF_NAME}"
           if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             # Re-run of a tag build (or a retried job): refresh the assets of the
             # existing release instead of failing on it.
-            gh release upload "${TAG}" dist/*.exe \
+            gh release upload "${TAG}" dist/*.exe dist/*.zip \
               --clobber \
               --repo "${GITHUB_REPOSITORY}"
           else
-            gh release create "${TAG}" dist/*.exe \
+            gh release create "${TAG}" dist/*.exe dist/*.zip \
               --title "rdm ${TAG}" \
               --generate-notes \
               --verify-tag \

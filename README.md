@@ -9,6 +9,8 @@ The default build is a **CLI**. The native desktop UI lives in the `rdm-gui` cra
 - Concurrent segmented downloads (`Range` requests, 1–128 connections)
 - Resume after pause, interrupt, or process exit
 - SQLite metadata under `.rdm/metadata.db` (override with `--data-dir`)
+- JSON sidecars under `<download-directory>/metadata/`
+- Chrome/Firefox context-menu integration for single and batch link downloads
 - Per-chunk retries, connect timeout, optional global speed cap
 - Optional SHA-256 check after assembly (`--checksum sha256:<hex>`)
 - Progress bars (disable with `--no-progress`)
@@ -34,6 +36,7 @@ After CI publishes assets (see [Releases](https://github.com/legionir/rdm/releas
 | Windows x86_64 | `rdm-windows-x86_64.exe` |
 | Linux GUI | `rdm-gui-linux-x86_64` |
 | Windows GUI | `rdm-gui-windows-x86_64.exe` |
+| Windows GUI + Chrome/Firefox integration | `rdm-browser-integration-windows.zip` |
 
 ```bash
 # Linux
@@ -117,7 +120,7 @@ vice versa.
 | `rdm list [--state …]` | Download table (full-width rows: click selects, double-click opens details) with search box and state filter |
 | `rdm info <ID>` | **Overview**, **Chunks** and **Events** tabs of the details modal |
 | `rdm info --json` | **JSON** tab of the details modal (with *Copy JSON*) |
-| `rdm remove <ID> [--purge]` | 🗑 row button (asks first; tick *also delete the finished file(s)*) and *Remove completed…* |
+| `rdm remove <ID> [--purge]` | 🗑 row button (asks first; a completed download offers *Also delete the downloaded file.*) and *Remove completed…*. Removing always discards partial data; without the file checkbox, the downloaded file stays on disk |
 | `--data-dir DIR` | `--data-dir` flag and the *Metadata directory* field in Settings |
 
 Beyond the CLI surface the window adds:
@@ -153,6 +156,14 @@ Beyond the CLI surface the window adds:
 Links and files dropped on the window itself take the same path (plain text,
 `text/uri-list`, `.url` and `.txt` files holding a link). A drop that is not a
 link is reported in the status bar instead of being silently ignored.
+
+**Browser integration** adds **Download with RDM** for a right-clicked link and
+**Download all links with RDM** for a checkbox list of the page's links. The
+batch window adds only the links checked when **OK** is pressed; **Cancel**
+adds nothing. Chrome and Firefox communicate with the GUI through the bundled
+`rdm-native-host`, not through a remote service. See
+[`browser-extension/README.md`](browser-extension/README.md) for the native-host
+registration and browser-specific installation steps.
 
 The application icon is generated from the app's own palette by
 `rdm-gui/assets/generate_icon.py` (no third-party libraries): the `.ico` is
@@ -246,6 +257,7 @@ rdm remove dl-1a2b3c4d --purge
 3. Download ranges concurrently into a chunk directory.
 4. Persist progress in `.rdm/metadata.db`.
 5. Merge chunks into the output file and optionally verify SHA-256.
+6. Write the human-readable sidecar to `<output-dir>/metadata/<filename>.rdm.json`.
 
 ## Development
 
